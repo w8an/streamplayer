@@ -77,18 +77,38 @@ VolumeStream volume(i2s);
 EncodedAudioStream mp3decode(&volume, new MP3DecoderHelix()); // Decoder stream
 StreamCopy copier(mp3decode, urlstream); // copy urlstream to decoder
 SSD1306AsciiWire oled;
+Preferences prefs;              // persistent data store
 
-Preferences prefs;                       // persistent data store
-char stream_item[25][2] = {              // prefs stream item names
+char stream_item[25][2] = {     // prefs stream item names
   "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", 
   "A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R"};
 char stream_type[2][4] = {"tag", "url"}; // prefs key names
 
+const char* tagElement[] = {    // portal html element tags
+  "tag0",  "tag1",  "tag2",  "tag3",  "tag4", 
+  "tag5",  "tag6",  "tag7",  "tag8",  "tag9", 
+  "tag10", "tag11", "tag12", "tag13", "tag14", 
+  "tag15", "tag16", "tag17", "tag18", "tag19",
+  "tag20", "tag21", "tag22", "tag23", "tag24"
+  };
+const char* nameElement[] = {   // portal html tag field titles
+  "Name 1",  "Name 2",  "Name 3",  "Name 4",  "Name 5",  
+  "Name 6",  "Name 7",  "Name 8",  "Name 9",  "Name 10", 
+  "Name 11", "Name 12", "Name 13", "Name 14", "Name 15", 
+  "Name 16", "Name 17", "Name 18", "Name 19", "Name 20", 
+  "Name 21", "Name 22", "Name 23", "Name 24", "Name 25"
+  };
+const char* urlElement[] = {    // portal url element tags/titles
+  "URL_1",  "URL_2",  "URL_3",  "URL_4",  "URL_5",  
+  "URL_6",  "URL_7",  "URL_8",  "URL_9",  "URL_10", 
+  "URL_11", "URL_12", "URL_13", "URL_14", "URL_15", 
+  "URL_16", "URL_17", "URL_18", "URL_19", "URL_20", 
+  "URL_21", "URL_22", "URL_23", "URL_24", "URL_25"
+};
+
 // Types for the array streamsX[] and the preference stream_type[] 
 #define TYPE_TAG 0
 #define TYPE_URL 1
-
-#define HOURS_24 86400000  // milliseconds in a day
 
 // Function prototypes
 void populateStreams(void);
@@ -104,7 +124,6 @@ bool checkProtocol(int);
 void setSleepTime(void);
 void oledStatusDisplay(void);
 String timerTimeLeft(void);
-
 
 
 /*
@@ -164,130 +183,14 @@ void setup() {
       }
 
       //  set up portal parameters
-      WiFiManagerParameter tag0("tag0", "Stream 1 Name", streamsGetTag(0), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag0);
-      WiFiManagerParameter url0("url0", "URL 1", streamsGetUrl(0), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url0);
-
-      WiFiManagerParameter tag1("tag1", "Stream 2 Name", streamsGetTag(1), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag1);
-      WiFiManagerParameter url1("url1", "URL 2", streamsGetUrl(1), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url1);
-
-      WiFiManagerParameter tag2("tag2", "Stream 3 Name", streamsGetTag(2), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag2);
-      WiFiManagerParameter url2("url2", "URL 3", streamsGetUrl(2), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url2);
-      
-      WiFiManagerParameter tag3("tag3", "Stream 4 Name", streamsGetTag(3), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag3);
-      WiFiManagerParameter url3("url3", "URL 4", streamsGetUrl(3), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url3);
-
-      WiFiManagerParameter tag4("tag4", "Stream 5 Name", streamsGetTag(4), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag4);
-      WiFiManagerParameter url4("url4", "URL 5", streamsGetUrl(4), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url4);
-
-      WiFiManagerParameter tag5("tag5", "Stream 6 Name", streamsGetTag(5), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag5);
-      WiFiManagerParameter url5("url5", "URL 6", streamsGetUrl(5), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url5);
-
-      WiFiManagerParameter tag6("tag6", "Stream 7 Name", streamsGetTag(6), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag6);
-      WiFiManagerParameter url6("url6", "URL 7", streamsGetUrl(6), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url6);
-
-      WiFiManagerParameter tag7("tag7", "Stream 8 Name", streamsGetTag(7), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag7);
-      WiFiManagerParameter url7("url7", "URL 8", streamsGetUrl(7), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url7);
-
-      WiFiManagerParameter tag8("tag8", "Stream 9 Name", streamsGetTag(8), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag8);
-      WiFiManagerParameter url8("url8", "URL 9", streamsGetUrl(8), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url8);
-
-      WiFiManagerParameter tag9("tag9", "Stream 10 Name", streamsGetTag(9), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag9);
-      WiFiManagerParameter url9("url9", "URL 10", streamsGetUrl(9), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url9);
-
-      WiFiManagerParameter tag10("tag10", "Stream 11 Name", streamsGetTag(10), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag10);
-      WiFiManagerParameter url10("url10", "URL 11", streamsGetUrl(10), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url10);
-
-      WiFiManagerParameter tag11("tag11", "Stream 12 Name", streamsGetTag(11), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag11);
-      WiFiManagerParameter url11("url11", "URL 12", streamsGetUrl(11), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url11);
-
-      WiFiManagerParameter tag12("tag12", "Stream 13 Name", streamsGetTag(12), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag12);
-      WiFiManagerParameter url12("url12", "URL 13", streamsGetUrl(12), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url12);
-      
-      WiFiManagerParameter tag13("tag13", "Stream 14 Name", streamsGetTag(13), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag13);
-      WiFiManagerParameter url13("url13", "URL 14", streamsGetUrl(13), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url13);
-
-      WiFiManagerParameter tag14("tag14", "Stream 15 Name", streamsGetTag(14), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag14);
-      WiFiManagerParameter url14("url14", "URL 15", streamsGetUrl(14), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url14);
-
-      WiFiManagerParameter tag15("tag15", "Stream 16 Name", streamsGetTag(15), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag15);
-      WiFiManagerParameter url15("url15", "URL 16", streamsGetUrl(15), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url15);
-
-      WiFiManagerParameter tag16("tag16", "Stream 17 Name", streamsGetTag(16), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag16);
-      WiFiManagerParameter url16("url16", "URL 17", streamsGetUrl(16), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url16);
-
-      WiFiManagerParameter tag17("tag17", "Stream 18 Name", streamsGetTag(17), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag17);
-      WiFiManagerParameter url17("url17", "URL 18", streamsGetUrl(17), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url17);
-
-      WiFiManagerParameter tag18("tag18", "Stream 19 Name", streamsGetTag(18), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag18);
-      WiFiManagerParameter url18("url18", "URL 19", streamsGetUrl(18), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url18);
-
-      WiFiManagerParameter tag19("tag19", "Stream 20 Name", streamsGetTag(19), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag19);
-      WiFiManagerParameter url19("url19", "URL 20", streamsGetUrl(19), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url19);
-
-      WiFiManagerParameter tag20("tag20", "Stream 21 Name", streamsGetTag(20), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag20);
-      WiFiManagerParameter url20("url20", "URL 21", streamsGetUrl(20), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url20);
-
-      WiFiManagerParameter tag21("tag21", "Stream 22 Name", streamsGetTag(21), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag21);
-      WiFiManagerParameter url21("url21", "URL 22", streamsGetUrl(21), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url21);
-
-      WiFiManagerParameter tag22("tag22", "Stream 23 Name", streamsGetTag(22), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag22);
-      WiFiManagerParameter url22("url22", "URL 23", streamsGetUrl(22), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url22);
-      
-      WiFiManagerParameter tag23("tag23", "Stream 24 Name", streamsGetTag(23), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag23);
-      WiFiManagerParameter url23("url23", "URL 24", streamsGetUrl(23), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url23);
-
-      WiFiManagerParameter tag24("tag24", "Stream 25 Name", streamsGetTag(24), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&tag24);
-      WiFiManagerParameter url24("url24", "URL 25", streamsGetUrl(24), STREAM_ELEMENT_SIZE-1);
-      wifiMan.addParameter(&url24);
+      WiFiManagerParameter* tagElementParam[25]; // Array to store pointers to WiFiManagerParameter tag objects
+      WiFiManagerParameter* urlElementParam[25]; // and WiFiManagerParameter url objects
+      for (int i=0; i<25; i++) {
+        tagElementParam[i] = new WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
+        wifiMan.addParameter(tagElementParam[i]);
+        urlElementParam[i] = new WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
+        wifiMan.addParameter(urlElementParam[i]);
+      }
 
       oled.clear();
       oled.print(F("Portal is On-Line\nSSID: "));
@@ -296,32 +199,10 @@ void setup() {
 
       wifiMan.startConfigPortal(portalName); 
 
-      // Store data from portal into streamsX
-      streamsPut(0, tag0.getValue(), url0.getValue()); 
-      streamsPut(1, tag1.getValue(), url1.getValue());
-      streamsPut(2, tag2.getValue(), url2.getValue());
-      streamsPut(3, tag3.getValue(), url3.getValue());
-      streamsPut(4, tag4.getValue(), url4.getValue());
-      streamsPut(5, tag5.getValue(), url5.getValue());
-      streamsPut(6, tag6.getValue(), url6.getValue());
-      streamsPut(7, tag7.getValue(), url7.getValue());
-      streamsPut(8, tag8.getValue(), url8.getValue());
-      streamsPut(9, tag9.getValue(), url9.getValue());
-      streamsPut(10, tag10.getValue(), url10.getValue()); 
-      streamsPut(11, tag11.getValue(), url11.getValue());
-      streamsPut(12, tag12.getValue(), url12.getValue());
-      streamsPut(13, tag13.getValue(), url13.getValue());
-      streamsPut(14, tag14.getValue(), url14.getValue());
-      streamsPut(15, tag15.getValue(), url15.getValue());
-      streamsPut(16, tag16.getValue(), url16.getValue());
-      streamsPut(17, tag17.getValue(), url17.getValue());
-      streamsPut(18, tag18.getValue(), url18.getValue());
-      streamsPut(19, tag19.getValue(), url19.getValue());
-      streamsPut(20, tag20.getValue(), url20.getValue()); 
-      streamsPut(21, tag21.getValue(), url21.getValue());
-      streamsPut(22, tag22.getValue(), url22.getValue());
-      streamsPut(23, tag23.getValue(), url23.getValue());
-      streamsPut(24, tag24.getValue(), url24.getValue());
+      // Store data fields from portal into streamsX array
+      for (int i=0; i<25; i++) {
+        streamsPut(i, tagElementParam[i]->getValue(), urlElementParam[i]->getValue()); 
+      }
 
       // Update the prefs object from streamsX array for persistence
       populatePrefs();  
@@ -386,7 +267,7 @@ bool systemSleeping = false;
 bool timerRunning = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
-unsigned long sleepTimer = HOURS_24; // 24 hours
+unsigned long sleepTimer;
 
 
 /*
@@ -432,21 +313,33 @@ void loop() {
 
     if (rotaryEncoder.isEncoderButtonClicked()) { 
       if (settingGet(audiovol) == 0) { 
-        // Set sleep timer when volume is zero
+        // set/reset sleep timer or power down when volume is zero
         oled.clear();
-        oled.println("SET TIMER");
-        setSleepTime();  // choose timer minutes
 
-        oled.clear();
-        if (sleepTimer == 0) {
-          // cancel timer
+        sleepCurrentTime = millis();
+        if (timerRunning & ((sleepCurrentTime - sleepStartTime) < 3000)) {
+          // if user presses button within 3 seconds of timer set
+          // and volume is zero, stop audio streaming
+          systemSleeping = true;
           timerRunning = false;
-          oled.println("CANCEL TIMER");
+          urlstream.end();
+          systemStreaming = false;
+          oled.println("SYSTEM HALT");
         }
         else {
-          timerRunning = true;
-          oled.println("TIMER SET"); 
-          oled.println(sleepTimer);
+          // Set or reset sleep timer when volume is zero
+          setSleepTime();  // set/reset timer minutes
+
+          if (sleepTimer == 0) {
+            // cancel timer
+            timerRunning = false;
+            oled.println("CANCEL TIMER");
+          } 
+          else {
+            timerRunning = true;
+            oled.println("TIMER SET"); 
+            oled.println("60 minutes");  
+          }
         }
         displayOn = true;
         oledStartTime = millis(); // tickle the display timer
@@ -531,36 +424,20 @@ void loop() {
  *    Program Functions
  */
 
-// Choose sleep time in minutes
+// set sleep time to 60 minutes
 void setSleepTime(void) {
-
-  // INCOMPLETE 
-  // **for now, just set timer to 60 mins if it is off, or
-  // **cancel it by setting to zero mins if it is running.
-
-  // set to 0 (zero) to disable timer
-  /*
-    6000  = 6    secs
-   60000  = 60        = 1 minutes
-  600000  = 600       = 10   mins
- 6000000  = 6000 s    = 100  mins
- 
- 43,200,000 ms = 12 hour
- 86,400,000 ms = 24 hr
- 
+  /* millisecs
        900,000 = 15 mins
-     1,800,000 = 30
+     1,800,000 = 30 mins
      3,600,000 = 1 hour
      7,200,000 = 2 hour
-*/
-  //sleepTimer = 15000;    // 15 secs for testing
-  //sleepTimer = 3600000;    // 60 mins
-
-  sleepTimer = (timerRunning ? 0 : 3600000);
-  sleepStartTime = millis();
+  */
+  // set to 0 (zero) to disable timer
+  sleepTimer = (timerRunning ? 0 : 3600000); // set timer or reset if running
+  sleepStartTime = millis();  // sleep timer baseline
 }
 
-// display timer, signal, volume level
+// display the timer, signal, volume level
 void oledStatusDisplay(void) {
   int dBm = WiFi.RSSI();
   oled.clear();
@@ -597,7 +474,7 @@ String timerTimeLeft(void) {
     String minutesStr = (minutes < 10) ? "0" + String(minutes) : String(minutes);
     String secondsStr = (seconds < 10) ? "0" + String(seconds) : String(seconds);
 
-    // Concatenate the result in "HH:MM:SS" format
+    // Result in "HH:MM:SS" format
     //return hoursStr + ":" + minutesStr + ":" + secondsStr;
     return String(minutes) + " mins";
 }
@@ -706,33 +583,33 @@ void initializeStreams(void) {
 
   // 25 Streams (50 char name + 50 char url)
   char stream_data[50][50] = { // 50 elements of 50 chars
-    // default streams, 25 totalItems
+    // 1-10, default streams, 25 totalItems
     "Psyndora Chillout","http://cast.magicstreams.gr:9125/stream",
-    "Detroit Industrial Underground", "http://138.197.0.4:8000/stream",
-    "Gothville", "http://gothville.radio:8000/stream",
-    "Synphaera Radio","http://ice2.somafm.com/synphaera-128-mp3",
-    "Mangled Web Radio", "http://144.126.151.19:8000/mp3",
-    "Rare 80s Music", "http://209.9.238.4:9844/",
-    "Ambient Radio", "http://uk2.internet-radio.com:8171/stream",
-    "Dimensione Relax", "http://51.161.115.200:8012/stream",
-    "Lounge Radio", "http://fr1.streamhosting.ch:80/lounge128.mp3",
-    "Skylark Stream", "http://uk2.internet-radio.com:8164/listen.ogg",
-
+    "Radio Bloodstream","http://uk1.internet-radio.com:8294/live.m3u",
     "Radio Play Emotions", "http://5.39.82.157:8054/stream",
-    "","",
-    "","",
-    "","",
-    "","",
-    "","",
-    "","",
-    "","",
-    "","",
-    "","",
-
+    "Rare 80s Music", "http://209.9.238.4:9844/",
+    "Skylark Stream", "http://uk2.internet-radio.com:8164/listen.ogg",
+    "Synphaera Radio","http://ice2.somafm.com/synphaera-128-mp3",
+    "Tecknicky Stream","http://212.96.160.160:8054",
+    "Ambient Radio", "http://uk2.internet-radio.com:8171/stream",
     "Best of Art Bell","http://108.161.128.117:8050",
-    "WDBF","http://s4.voscast.com:8296",
-    "WTCS","http://96.31.83.86:8001",
+    "Big 80s Station","http://158.69.114.190:8024",
+    // 11-20
+    "Big Hair Radio","http://192.111.140.11:8508",
+    "Classical Bolivariana","http://131.0.136.54:7630",
+    "Dark Edge Radio","http://5.35.214.196:8000",
+    "Detroit Industrial Underground", "http://138.197.0.4:8000/stream",
+    "Dimensione Relax", "http://51.161.115.200:8012/stream",
+    "EarthSong Experimental","http://cast3.my-control-panel.com:7084/autodj",
     "First Amendment Radio","http://198.178.123.8:7862",
+    "Gothville", "http://gothville.radio:8000/stream",
+    "KXFU - RDSN.net","http://184.95.62.170:9788",
+    "Lounge Radio", "http://fr1.streamhosting.ch:80/lounge128.mp3",
+    // 21-25
+    "Mangled Web Radio", "http://144.126.151.19:8000/mp3",
+    "Metal Express Radio","http://5.135.154.69:11590",
+    "Metal Rock Radio","http://kathy.torontocast.com:2800",
+    "Mission Control Radio","http://151.80.42.191:8372",
     "Mr. Liberty Show","http://198.178.123.5:8258"
   };
 
@@ -754,3 +631,4 @@ void initializeStreams(void) {
 }
 
 // eof
+
