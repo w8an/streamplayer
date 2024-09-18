@@ -8,8 +8,8 @@
  * Turn the knob to set volume. Press the button to change station.
  * Set volume to 0 then press button to set timer. Do again to cancel.
  * Two clicks within 3 seconds with zero volume halts stream.
- * Hold pin 15 low on reset to launch wifi configuration portal.
- * Hold pin 16 low on reset to store stream data from presets.
+ * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
+ * Hold STREAM_PIN low on reset to load and store default stream data.
  */
 
 #include <Arduino.h>
@@ -29,14 +29,15 @@
 #define ROTARY_ENCODER_BUTTON_PIN 34 // sw
 #define ROTARY_ENCODER_STEPS 2       // 1, 2 or 4
 
-#define I2C_ADDRESS 0x3C  // ssd1306 oled
-#define SDA_PIN 18        // i2c data
-#define SCL_PIN 19        // i2c clock
+#define I2C_ADDRESS 0x3C   // ssd1306 oled
+#define SDA_PIN 18         // i2c data
+#define SCL_PIN 19         // i2c clock
 
-#define PORTAL_PIN 15     // enable wifi portal when low on reset      
-#define STREAM_PIN 16     // set default streams when low on reset
+#define PORTAL_PIN 15      // enable wifi portal when low on reset      
+#define STREAM_PIN 16      // set default streams when low on reset
 
-#define OLED_TIMER 5000   // 5 seconds, display timeout
+#define OLED_TIMER 5000    // display timeout in milliseconds
+#define SLEEP_TIME 3600000 // one hour in milliseconds
 
 // System is hard coded to 25 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
@@ -116,7 +117,7 @@ int settingGet(const char*);
 void settingPut(const char*, int);
 void menuDisplay(int);
 bool checkProtocol(int);
-void setSleepTime(void);
+void runSleepTimer(bool);
 void oledStatusDisplay(void);
 String timerTimeLeft(void);
 
@@ -145,19 +146,16 @@ void setup() {
   oled.setFont(System5x7);
   oled.clear();
   oled.print(F("Stream Player\nSteven R Stuart\nW8AN\n"));
-  //oled.print(F(__DATE__));
-  //oled.print(F(" "));
-  //oled.print(F(__TIME__));
 
   // Reload the default streams if desired
   if (digitalRead(STREAM_PIN) == LOW) {
-    initializeStreams(); // get the default streams
+    initializeStreams();          // get the default streams
   }
-  populateStreams();  // fill streamsX array
-  currentIndex = settingGet(listened);  // get index of prev listened stream
+  populateStreams();              // fill streamsX array from prefs
+  currentIndex = settingGet(listened);  // get index of previous listened stream
 
   // Configure Wifi system
-  WiFiManager wifiMan;
+  WiFiManager wifiMan;            // instatiate wifi object
   wifiMan.setDebugOutput(false);  // true if you want send to serial debug
   // wifiMan.resetSettings();     // force a wifi configuration portal
 
@@ -170,13 +168,16 @@ void setup() {
       wifi_config_t conf;
       if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK) {
         if (digitalRead(STREAM_PIN) == LOW) {
-          // show the stored ssid and password if stream pin is also low
+          // show the stored ssid and password if STREAM_PIN is also low
           Serial.printf("SSID: %s\n", (char*)conf.sta.ssid);
           Serial.printf("Password: %s\n", (char*)conf.sta.password);
         }
       } 
       else {
         Serial.println("Failed to get WiFi config");
+        oled.clear();
+        oled.println("WiFi Error");
+        oled.print("CONFIG FAIL");
       }
 
       //  set up portal parameters
@@ -194,7 +195,7 @@ void setup() {
       oled.print(portalName);
       oled.print(F("\nIP  : 192.168.4.1"));
 
-      wifiMan.startConfigPortal(portalName); // get user data from wifi connected device
+      wifiMan.startConfigPortal(portalName); // get user data from a wifi connected device
 
       // Store data fields from portal into streamsX array
       for (int i=0; i<TOTAL_ITEMS; i++) {
@@ -209,20 +210,21 @@ void setup() {
   else {
     Serial.println("Failed to connect to WiFi.");
     oled.clear();
-    oled.print("WiFi Failed");
+    oled.println("WiFi Error");
+    oled.print("CONNECT FAIL");
     ESP.restart();
   }
 
   // Keyes KY-040
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
-  rotaryEncoder.setBoundaries(0, 100, false); // minValue, maxValue, circle?
+  rotaryEncoder.setBoundaries(0, 100, false); // minValue, maxValue, circular
   rotaryEncoder.setEncoderValue(100-settingGet(audiovol));   // initial volume 
   rotaryEncoder.setAcceleration(25);
   //rotaryEncoder.disableAcceleration();
 
-  // Audio system error messages
-  AudioLogger::instance().begin(Serial, AudioLogger::Warning);  // Debug, Info, Warning, Error
+  // Audio system error messages (Debug, Info, Warning, Error)
+  AudioLogger::instance().begin(Serial, AudioLogger::Warning);   
 
   // Output stream configuration
   auto config = i2s.defaultConfig(TX_MODE);
@@ -235,7 +237,7 @@ void setup() {
   mp3decode.begin();
 
   // Volume control
-  volume.begin(config);   // we need to provide the bits_per_sample and channels
+  volume.begin(config);   // config provides the bits_per_sample and channels
   volume.setVolume(settingGet(audiovol) / 100.0);  // get saved volume
 }
 
@@ -244,12 +246,12 @@ void setup() {
  * Set up some loop globals
  */
 
-// oled screen blank timing
+// oled screen status and blanking timing
 bool displayOn = true;
 unsigned long oledStartTime; 
 unsigned long oledCurrentTime = 0;   
 
-// stream startup timing
+// stream status and timing
 bool systemStreaming = false;
 unsigned long streamStartTime = millis(); 
 unsigned long streamCurrentTime = 0; 
@@ -259,12 +261,12 @@ bool menuOpen = false;
 int menuIndex = currentIndex;
 long volumePos, volLevel;
 
-// sleep timer
+// sleep timer status and timing
 bool systemSleeping = false;
 bool timerRunning = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
-unsigned long sleepTimer;
+//unsigned long sleepTimer;
 
 
 /*
@@ -274,13 +276,12 @@ unsigned long sleepTimer;
 void loop() {
   if (systemSleeping) {
     
-    timerRunning = false;
-    
     if (rotaryEncoder.isEncoderButtonClicked() ||
         rotaryEncoder.encoderChanged()) {
 
       // wake from sleep
       systemSleeping = false;
+      runSleepTimer(timerRunning);  // reset timer
 
       oled.clear();
       oled.println("WAKE UP");
@@ -327,29 +328,25 @@ void loop() {
         sleepCurrentTime = millis();
         if (timerRunning & (sleepCurrentTime - sleepStartTime) < 3000) {
           // if user presses button within 3 seconds of timer set
-          // and volume is zero, stop audio streaming
+          // and the volume is zero, stop streaming
           urlstream.end();          // stop stream download
           systemStreaming = false;  // set state signals
-          timerRunning = false;
           systemSleeping = true;
           oled.println("SYSTEM HALT"); // notify user
         }
 
         else {
           // Set or reset sleep timer when volume is zero
-          setSleepTime();  // set\reset timer milliseconds
 
-          if (sleepTimer == 0) { 
-            // cancel timer
-            timerRunning = false;
+          if (timerRunning) {
+            runSleepTimer(false);
             oled.println("CANCEL TIMER");
           }
-
-          else { 
-            // timer has been set
-            timerRunning = true;
+          else {
+            runSleepTimer(true);
             oled.println("TIMER SET"); 
-            oled.println("60 minutes");  
+            oled.print(SLEEP_TIME/60000); // convert to minutes
+            oled.println(" minutes");  
           }
         }
 
@@ -432,12 +429,12 @@ void loop() {
     
     // watch for timeout
     sleepCurrentTime = millis();
-    if (sleepCurrentTime - sleepStartTime > sleepTimer) {
+    if (sleepCurrentTime - sleepStartTime > SLEEP_TIME) {
+//    if (sleepCurrentTime - sleepStartTime > sleepTimer) {
 
       // timer has expired, go to sleep
       urlstream.end();         // stop stream download
       systemStreaming = false; // set state signals
-      timerRunning = false;
       systemSleeping = true;
 
       oled.clear();
@@ -453,21 +450,18 @@ void loop() {
  *    Program Functions
  */
 
-// set sleep time to 60 minutes
-void setSleepTime(void) {
-  /* millisecs
-       900,000 = 15 mins
-     1,800,000 = 30 mins
-     3,600,000 = 1 hour
-     7,200,000 = 2 hour
-  */
-  // set to 0 (zero) to disable timer
-  sleepTimer = (timerRunning ? 0 : 3600000); // set timer or reset if running
-  sleepStartTime = millis();  // sleep timer baseline
+// enable or disable sleep timer
+void runSleepTimer(bool enabled) {
+  // enabled = true to set, false to clear
+  timerRunning = enabled;
+  if (enabled) {
+    sleepStartTime = millis();  // sleep timer baseline
+  }
 }
 
 // display the timer, signal, volume level
 void oledStatusDisplay(void) {
+
   int dBm = WiFi.RSSI();
   oled.clear();
   oled.println(streamsGetTag(currentIndex)); // stream name
@@ -491,20 +485,8 @@ String timerTimeLeft(void) {
     sleepCurrentTime = millis();
 
     // calculate time left in seconds
-    long totalSeconds = sleepTimer/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
-
-    // Calculate hours, minutes, and seconds
-    int hours = totalSeconds / 3600;
+    long totalSeconds = SLEEP_TIME/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
     int minutes = (totalSeconds % 3600) / 60;
-    int seconds = totalSeconds % 60;
-
-    // Format each part as two digits
-    String hoursStr = (hours < 10) ? "0" + String(hours) : String(hours);
-    String minutesStr = (minutes < 10) ? "0" + String(minutes) : String(minutes);
-    String secondsStr = (seconds < 10) ? "0" + String(seconds) : String(seconds);
-
-    // Result in "HH:MM:SS" format
-    //return hoursStr + ":" + minutesStr + ":" + secondsStr;
     return String(minutes) + " mins";
 }
 
@@ -542,7 +524,7 @@ bool checkProtocol(int menuIndex) {
   return strncmp(streamsGetUrl(menuIndex), "http://", 7) == 0;
 }
 
-// Retrieve a persistent setting
+// Retrieve a persistent preference setting
 int settingGet(const char* setting) {
   prefs.begin(settings, true); // read only
   int settingVal = prefs.getInt(setting, 0); // default = 0
@@ -550,7 +532,7 @@ int settingGet(const char* setting) {
   return settingVal;
 }
 
-// Store a persistent setting
+// Store a persistent preference setting
 void settingPut(const char* setting, int settingVal) {
   prefs.begin(settings, false); // not read only
   prefs.putInt(setting, settingVal);
@@ -604,7 +586,7 @@ char* streamsGetUrl(int index) { // index = 0..9
   return streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE);
 }
 
-// Place the following stream name tags and urls into the prefs object  
+// Load the following default stream name tags and urls into the prefs object  
 void initializeStreams(void) {
 
   // This function clobbers any already stored streams.
@@ -613,8 +595,8 @@ void initializeStreams(void) {
   // 25 Streams (50 char name + 50 char url)
   char stream_data[50][50] = { // 50 elements of 50 chars
     // 1-10, default streams, 25 total items
-    "Psyndora Chillout","http://cast.magicstreams.gr:9125/stream",
-    "Radio Bloodstream","http://uk1.internet-radio.com:8294/live.m3u",
+    "Psyndora Chillout","http://cast.magicstreams.gr:9125",
+    "Psyndora Psytrance","http://cast.magicstreams.gr:9111",
     "Radio Play Emotions", "http://5.39.82.157:8054/stream",
     "Rare 80s Music", "http://209.9.238.4:9844/",
     "Skylark Stream", "http://uk2.internet-radio.com:8164/listen.ogg",
