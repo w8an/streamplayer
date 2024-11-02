@@ -16,6 +16,7 @@
 #include <Preferences.h>
 #include <WiFi.h>
 //#include "esp_wifi.h"
+//#include "esp_sleep.h"
 #include <WiFiManager.h>
 #include "AudioTools.h"
 #include "AudioCodecs/CodecMP3Helix.h"
@@ -37,7 +38,7 @@
 #define STREAM_PIN 16      // set default streams when low on reset
 
 #define OLED_TIMER 5000    // display timeout in milliseconds
-#define SLEEP_TIME 3600000 // one hour in milliseconds
+#define SLEEP_TIMER 3600000 // one hour in milliseconds
 
 // System is hard coded to 25 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
@@ -266,7 +267,6 @@ bool systemSleeping = false;
 bool timerRunning = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
-//unsigned long sleepTimer;
 
 
 /*
@@ -321,23 +321,33 @@ void loop() {
       // button was pressed
 
       if (settingGet(audiovol) == 0) { 
-        // volume is zero
-
-        // set\reset sleep timer or power down
+        // volume is 0. Handle timer or sleep mode
         oled.clear();
         sleepCurrentTime = millis();
+
         if (timerRunning & (sleepCurrentTime - sleepStartTime) < 3000) {
-          // if user presses button within 3 seconds of timer set
-          // and the volume is zero, stop streaming
+          // If user presses button within 3 seconds of timer set (twice 
+          // in 3 seconds) when the volume is zero, then fall into cpu 
+          // light-sleep mode. Note that if the timer is running, then the 
+          // first click will cancel it, the next 2 clicks will power down
+          oled.println("SYSTEM POWER DOWN"); // status notification
           urlstream.end();          // stop stream download
           systemStreaming = false;  // set state signals
           systemSleeping = true;
-          oled.println("SYSTEM HALT"); // notify user
+          esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
+          esp_wifi_stop();          // shut down wifi
+          delay(OLED_TIMER);
+          oled.clear();
+          esp_light_sleep_start();  // put cpu to sleep
+          // CPU now in sleep mode
+          // code will resume here when restart signal is asserted
+          oled.println("SYSTEM RESTART"); // notification
+          esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+          esp_restart();
         }
 
         else {
           // Set or reset sleep timer when volume is zero
-
           if (timerRunning) {
             runSleepTimer(false);
             oled.println("CANCEL TIMER");
@@ -345,7 +355,7 @@ void loop() {
           else {
             runSleepTimer(true);
             oled.println("TIMER SET"); 
-            oled.print(SLEEP_TIME/60000); // convert to minutes
+            oled.print(SLEEP_TIMER/60000); // convert to minutes
             oled.println(" minutes");  
           }
         }
@@ -429,8 +439,7 @@ void loop() {
     
     // watch for timeout
     sleepCurrentTime = millis();
-    if (sleepCurrentTime - sleepStartTime > SLEEP_TIME) {
-//    if (sleepCurrentTime - sleepStartTime > sleepTimer) {
+    if (sleepCurrentTime - sleepStartTime > SLEEP_TIMER) {
 
       // timer has expired, go to sleep
       urlstream.end();         // stop stream download
@@ -485,7 +494,7 @@ String timerTimeLeft(void) {
     sleepCurrentTime = millis();
 
     // calculate time left in seconds
-    long totalSeconds = SLEEP_TIME/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
+    long totalSeconds = SLEEP_TIMER/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
     int minutes = (totalSeconds % 3600) / 60;
     return String(minutes) + " mins";
 }
