@@ -2,13 +2,13 @@
  * esp32-stream-system.cpp
  * jul-sep 2024
  * 
- * EtherPlayer - Stream From the Beyond
+ * AetherStream - Stream From the Beyond
  * Copyright (C)2024, Steven R Stuart
  * 
- * This program outputs mp3 internet stream to max98357a i2c audio device(s).
+ * This program outputs icy/mp3 internet stream to max98357a i2c audio device(s).
  * Turn the knob to set volume. Press the button to change station.
  * Set volume to 0 then press button to set timer. Do again to cancel.
- * When device is powered up, an initial timer is set. (4 hours)
+ * When device is powered up, an initial timer is set. (1 hour)
  * Two clicks within 3 seconds with zero volume halts stream.
  * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
@@ -18,9 +18,8 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
-#include "AudioTools.h"            // UPDATE : https://www.pschatzmann.ch/home/2024/10/04/arduino-audiotools-v1-0-0/
-#include "AudioCodecs/CodecMP3Helix.h"
-//#include "AudioTools/AudioCodecs/CodecMP3Helix.h" // from "AudioCodecs/CodecMP3Helix.h"
+#include "AudioTools.h" 
+#include "AudioTools/AudioCodecs/CodecMP3Helix.h" 
 #include "AiEsp32RotaryEncoder.h"
 #include <Wire.h>
 #include "SSD1306Ascii.h"
@@ -80,7 +79,7 @@ char streamsX[TOTAL_ITEMS * STREAM_ITEM_SIZE]; // names & urls of stations
 // Preferences database
 #define PREF_RO true                  // pref read-only
 #define PREF_RW false                 // pref read/write
-const char* portalName = "NETRADIO";  // portal ssid
+const char* portalName = "AetherStreamer"; // portal ssid
 const char* settings = "settings";    // general purpose namespace in prefs
 const char* listened = "listened";    // settings key of last listened to stream
 const char* audiovol = "volume";      // settings key of audio level
@@ -156,9 +155,13 @@ const char* urlElement[] = {          // portal url element tags/titles
   "URL_36"
 };
 
+// globals
+long volLevel; // audio volume level
+
 // portal elements
 WiFiManagerParameter* tagElementParam[TOTAL_ITEMS]; // Arrays to store pointers to tag objects
 WiFiManagerParameter* urlElementParam[TOTAL_ITEMS]; // and url objects
+
 
 /*
  *
@@ -173,7 +176,7 @@ void setup() {
 
   // Message port
   Serial.begin(115200);
-  Serial.println(F("EtherPlayer"));
+  Serial.println(F("Aether Streamer"));
   Serial.print(F("Steven R Stuart,  "));
   Serial.print(F(__DATE__));
   Serial.print(F(" "));
@@ -186,6 +189,7 @@ void setup() {
   Wire.setClock(400000L);
   oled.begin(&Adafruit128x32, I2C_ADDRESS);  // start oled
   oled.setFont(System5x7);
+  //oled.setFont(lcd5x7);
   
   if (digitalRead(NVS_CLR_PIN) == LOW) WipeNVS(); // user request to clear memory
 
@@ -198,7 +202,6 @@ void setup() {
 
   // Configure Wifi system
   WifiPortalMessage();
-
   wifiMan.setDebugOutput(false);  // true if you want send to serial debug
   if (digitalRead(PORTAL_PIN) == LOW) {
     Serial.println(F("User requested WiFi configuration portal"));
@@ -236,7 +239,7 @@ void setup() {
   }
 
   oled.clear();
-  oled.print(F("EtherPlayer\nSteven R Stuart\nW8AN"));
+  oled.print(F("Aether Streamer\nSteven R Stuart\nW8AN"));
   //oled.print(Version());
 
   // Keyes KY-040
@@ -262,7 +265,8 @@ void setup() {
 
   // Volume control
   volume.begin(config);   // config provides the bits_per_sample and channels
-  volume.setVolume(settingGet(audiovol) / 100.0);  // get saved volume
+  volLevel = settingGet(audiovol);     // get the saved volume level
+  volume.setVolume(volLevel / 100.0);  // set that volume
 }
 
 
@@ -281,7 +285,7 @@ bool systemStreaming = false;
 // menu vars
 bool menuOpen = false;
 int menuIndex = currentIndex;
-long volumePos, volLevel;
+long volumePos;
 
 // sleep timer status and timing
 bool systemSleeping = false;
@@ -291,6 +295,8 @@ unsigned long sleepCurrentTime = 0;
 
 // portal
 int portalMode = PORTAL_DOWN; 
+bool firstPortal = true;
+
 
 /*
  *
@@ -462,7 +468,7 @@ void loop() {
 
       if (portalMode == PORTAL_UP) StreamPortalMessage(); // an override message
 
-      // Store volume level after user has settled on a value
+      // Store volume level only after user has settled on a value
       if ((volLevel != settingGet(audiovol)) && (volLevel > 0)) 
         settingPut(audiovol, volLevel);  // store the setting 
     }
@@ -501,13 +507,22 @@ void loop() {
       // start the portal
 
       //  set up portal parameters
-      for (int i=0; i<TOTAL_ITEMS; i++) {
-        tagElementParam[i] = new WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
-        wifiMan.addParameter(tagElementParam[i]);
-        urlElementParam[i] = new WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
-        wifiMan.addParameter(urlElementParam[i]);
+      if (firstPortal) {
+        // only instantiate new parameter objects if they have not yet been created
+        firstPortal = false;
+        for (int i=0; i<TOTAL_ITEMS; i++) {
+          tagElementParam[i] = new WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
+          urlElementParam[i] = new WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
+          wifiMan.addParameter(tagElementParam[i]);
+          wifiMan.addParameter(urlElementParam[i]);
+        }
       }
-
+      else {
+        for (int i=0; i<TOTAL_ITEMS; i++) {
+          WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
+          WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
+        }
+      }
       wifiMan.setSaveParamsCallback(saveParamsCallback);  // param web page save event
       wifiMan.startWebPortal();
       portalMode = PORTAL_UP; 
@@ -578,6 +593,7 @@ void saveParamsCallback(void) {
  */
 void metadataCallback(MetaDataType type, const char* str, int len) {
   // called when stream metadata is available
+  // note that ICYStream must be used
 
   Serial.print("==> ");
   Serial.print(toStr(type));
@@ -658,7 +674,7 @@ void WifiPortalMessage(void) {
   oled.println(F("Configure at"));
   oled.print(F("ssid: "));
   oled.println(portalName);
-  oled.println(F("ip: 192.168.4.1"));
+  oled.println(F("ip:   192.168.4.1"));
 }
 
 
@@ -686,23 +702,25 @@ void menuDisplay(int menuIndex) {
 
   // previous line item
   int lineIndex = (menuIndex == 0 ? (TOTAL_ITEMS-1) : menuIndex-1);
-  oled.print(F(" ")); // indent
+  //oled.print(F(" ")); // indent
   if (checkProtocol(lineIndex)) oled.println(streamsGetTag(lineIndex));
   else oled.println(lineIndex+1); // print only line number if error
   
   // current line item
   if (checkProtocol(menuIndex)) {  // selection line
-    oled.print(F(">")); // current item pointer
+    oled.setInvertMode(true);
+    //oled.print(F(">")); // current item pointer
     oled.println(streamsGetTag(menuIndex));
+    oled.setInvertMode(false);
   } 
   else {
-    oled.print(F(" ")); // indent
+    //oled.print(F(" ")); // indent
     oled.println(menuIndex+1);
   }
   
   // next line item
   lineIndex = (menuIndex == (TOTAL_ITEMS-1) ? 0 : menuIndex+1);
-  oled.print(F(" ")); // indent
+  //oled.print(F(" ")); // indent
   if (checkProtocol(lineIndex)) oled.println(streamsGetTag(lineIndex));
   else oled.print(lineIndex+1);
 }
