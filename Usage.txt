@@ -17,6 +17,7 @@ remaining until auto-shutdown will display when changing the volume.
 
 Power Down the receiver
 Set volume to zero, press button 3 times within 3 seconds.
+Alternatively, set volume to zero then wait 5 seconds.
 
 Turn ON the receiver after PowerDown
 Press button to power up. Adjust volume to desired level.
