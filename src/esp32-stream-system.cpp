@@ -3,13 +3,14 @@
  * jul-sep 2024
  * 
  * AetherStream - Stream From the Beyond
- * Copyright (C)2024, Steven R Stuart
+ * Copyright (C)2024,2025 Steven R Stuart
  * 
  * This program outputs icy/mp3 internet stream to max98357a i2c audio device(s).
  * Turn the knob to set volume. Press the button to change station.
  * Set volume to 0 then press button to set timer. Do again to cancel.
- * When device is powered up, an initial timer is set. (1 hour)
- * Two clicks within 3 seconds with zero volume halts stream.
+ * When device is powered up, an initial timer is set to 1 hour
+ * Two clicks within 3 seconds with 0 volume puts cpu to sleep.
+ * Set volume to 0 and system will sleep in 5 seconds.
  * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
  */
@@ -32,7 +33,7 @@ void metadataCallback(MetaDataType, const char*, int);
 void runSleepTimer(bool);
 void oledStatusDisplay(void);
 void StreamPortalMessage(void);
-void WifiPortalMessage(void);
+void wifiPortalMessage(void);
 String timerTimeLeft(void);
 void menuDisplay(int);
 bool checkProtocol(int);
@@ -44,8 +45,9 @@ void streamsPut(int, const char*, const char*);
 char* streamsGetTag(int);
 char* streamsGetUrl(int);
 void initializeStreams(void);
-String Version(void);
-void WipeNVS(void);
+String version(void);
+void systemPowerDown(void);
+void wipeNVS(void);
 
 // display I/O
 #define I2C_ADDRESS 0x3C        // ssd1306 oled
@@ -182,7 +184,7 @@ void setup() {
   Serial.print(F(" "));
   Serial.println(F(__TIME__));
   Serial.print(F("ver "));
-  Serial.println(Version());
+  Serial.println(version());
   
   // OLED display device
   Wire.begin(SDA_PIN, SCL_PIN);  // start i2c interface
@@ -191,22 +193,22 @@ void setup() {
   oled.setFont(System5x7);
   //oled.setFont(lcd5x7);
   
-  if (digitalRead(NVS_CLR_PIN) == LOW) WipeNVS(); // user request to clear memory
+  if (digitalRead(NVS_CLR_PIN) == LOW) wipeNVS(); // user request to clear memory
 
   if (digitalRead(STREAM_PIN) == LOW) 
     initializeStreams();   // user request to load default streams
-  populateStreams();       // fill streamsX array from prefs    ////////// TEST AND EDIT THIS FUNC
+  populateStreams();       // fill streamsX array from prefs 
 
   // Reload the default streams if desired
   currentIndex = settingGet(listened);  // get index of previous listened stream
 
   // Configure Wifi system
-  WifiPortalMessage();
+  wifiPortalMessage();
   wifiMan.setDebugOutput(false);  // true if you want send to serial debug
   if (digitalRead(PORTAL_PIN) == LOW) {
     Serial.println(F("User requested WiFi configuration portal"));
     //wifiMan.resetSettings();     // erase wifi configuration
-    WifiPortalMessage();
+    wifiPortalMessage();
     wifiMan.startConfigPortal(portalName); 
   }
   else {
@@ -240,7 +242,7 @@ void setup() {
 
   oled.clear();
   oled.print(F("Aether Streamer\nSteven R Stuart\nW8AN"));
-  //oled.print(Version());
+  //oled.print(version());
 
   // Keyes KY-040
   rotaryEncoder.begin();
@@ -359,23 +361,7 @@ void loop() {
           // light-sleep mode. Note that if the timer is running, then the 
           // first click will be caught by the timer cancel code. It then
           // takes 2 more clicks to power down.
-          oled.print(F("SYSTEM POWER DOWN\n\nv.")); // status notification
-          oled.print(Version());
-          urlstream.end();          // stop stream download
-          systemStreaming = false;  // set state signals
-          systemSleeping = true;
-          esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
-          esp_wifi_stop();          // shut down wifi
-          delay(OLED_TIMER);
-          oled.clear();
-          esp_light_sleep_start();  // put cpu to sleep
-
-          // CPU is now in sleep mode. ZZZzzzz
-
-          // code will resume here when restart signal is asserted
-          oled.println(F("SYSTEM RESTART")); // notification
-          esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-          esp_restart();
+          systemPowerDown();
         }
 
         else {
@@ -468,8 +454,10 @@ void loop() {
 
       if (portalMode == PORTAL_UP) StreamPortalMessage(); // an override message
 
+      if (volLevel == 0) systemPowerDown(); // Put into sleep mode
+
       // Store volume level only after user has settled on a value
-      if ((volLevel != settingGet(audiovol)) && (volLevel > 0)) 
+      if (volLevel != settingGet(audiovol)) 
         settingPut(audiovol, volLevel);  // store the setting 
     }
   }
@@ -667,7 +655,7 @@ void StreamPortalMessage(void) {
 /*
  * Display the Wifi configuration portal message
  */
-void WifiPortalMessage(void) {
+void wifiPortalMessage(void) {
 
   oled.clear();
   oled.println(F("WIFI PORTAL"));
@@ -815,7 +803,7 @@ void streamsPut(int index, const char* tag, const char* url) {
 /*
  * Get the name tag string from the streamsX array at index
  */
-char* streamsGetTag(int index) { // index = 0..9
+char* streamsGetTag(int index) { // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE);
 }
 
@@ -823,7 +811,7 @@ char* streamsGetTag(int index) { // index = 0..9
 /*
  * Get the url string from the streamsX array at index
  */
-char* streamsGetUrl(int index) { // index = 0..9
+char* streamsGetUrl(int index) { // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE);
 }
 
@@ -901,43 +889,68 @@ void initializeStreams(void) {
 /*
  * Create a version tag from compile time
  */
-String Version(void) {
-    // Extract date and time from __DATE__ and __TIME__
-    const char monthStr[12][4] = {
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    };
-    
-    // Parse __DATE__
-    char month[4];
-    int day, year;
-    sscanf(__DATE__, "%s %d %d", month, &day, &year);
+String version(void) {
+  // Extract date and time from __DATE__ and __TIME__
+  const char monthStr[12][4] = {
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  };
+  
+  // Parse __DATE__
+  char month[4];
+  int day, year;
+  sscanf(__DATE__, "%s %d %d", month, &day, &year);
 
-    // Convert month name to number
-    int monthNumber = 0;
-    for (int i = 0; i < 12; i++) {
-        if (strcmp(month, monthStr[i]) == 0) {
-            monthNumber = i + 1;
-            break;
-        }
-    }
+  // Convert month name to number
+  int monthNumber = 0;
+  for (int i = 0; i < 12; i++) {
+      if (strcmp(month, monthStr[i]) == 0) {
+          monthNumber = i + 1;
+          break;
+      }
+  }
 
-    // Parse __TIME__
-    int hour, minute, second;
-    sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second);
+  // Parse __TIME__
+  int hour, minute, second;
+  sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second);
 
-    // Format as "YYYYMMDD.HHMMSS"
-    char dateTimeString[20];
-    snprintf(dateTimeString, sizeof(dateTimeString), "%04d%02d%02d.%02d%02d",
-             year, monthNumber, day, hour, minute);
+  // Format as "YYYYMMDD.HHMMSS"
+  char dateTimeString[20];
+  snprintf(dateTimeString, sizeof(dateTimeString), "%04d%02d%02d.%02d%02d",
+            year, monthNumber, day, hour, minute);
 
-    return String(dateTimeString);
+  return String(dateTimeString);
 }
+
+
+/*
+ * Put CPU to sleep. Reboot when wake up requested.
+ */
+void systemPowerDown(void) {
+  oled.print(F("SYSTEM POWER DOWN\n\nv.")); // status notification
+  oled.print(version());
+  urlstream.end();          // stop stream download
+  systemStreaming = false;  // set state signals
+  systemSleeping = true;
+  esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
+  esp_wifi_stop();          // shut down wifi
+  delay(OLED_TIMER);
+  oled.clear();
+  esp_light_sleep_start();  // put cpu to sleep
+
+  // CPU is now in sleep mode. ZZZzzzz
+
+  // code will resume here when restart signal is asserted
+  oled.println(F("SYSTEM RESTART")); // notification
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  esp_restart();            // reboot cpu
+}
+
 
 /*
  * Wipe the NVS memory (wifi, prefs, etc.)
  */
-void WipeNVS(void) {
+void wipeNVS(void) {
   oled.clear();
   oled.print(F("NVS\nClearing Memory\n"));
   nvs_flash_erase();      // erase the NVS partition and...
