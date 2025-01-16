@@ -1,0 +1,57 @@
+AETHER STREAMER 
+
+Volume Level
+Turn knob to adjust volume level.
+
+Change Station
+Press button, turn knob to scroll the list to find your desired station. 
+When your desired station is highlighted on the list, press to select.
+The station stream will be launched immediately.
+
+60 Minute Timer
+Timer is enable by default after a system reset. It can be disabled.
+Set volume to zero, then press button. Adjust volume to desired level.
+If the timer is disabled, the same procedure will enable it. The time
+remaining until auto-shutdown will display when changing the volume.
+
+
+Power Down the receiver
+Set volume to zero, press button 3 times within 3 seconds.
+
+Turn ON the receiver after PowerDown
+Press button to power up. Adjust volume to desired level.
+
+
+
+Modify Station List
+Set side panel switch to PORTAL position.
+The display will show the unit configuration portal address, 
+something like:  
+
+PORTAL OPEN
+192.168.1.10/param
+
+Using a phone or PC, go to the address displayed on the panel.
+There will be 36 memory slots displayed, two lines per item; the Name 
+and Address of each station. Change any slot name and address
+as desired. Click the SAVE button at the bottom of the page to
+store changes into the Aether Streamer unit.
+Set the side panel switch into the center NORM position.
+
+
+
+CONFIGURE WIFI
+select the Wifi station named: NETRADIO
+Using phone browser, go to address: 192.168.4.1
+Update station list, then press the SAVE button.
+Set switch to NORMAL position.
+
+
+HOW TO LOCATE NEW STATIONS
+https://www.internet-radio.com/
+
+
+OTA update
+In portal, upload the firmware file located at:
+/../esp32_stream_player/.pio/build/esp32dev/firmware.bin
+
