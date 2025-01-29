@@ -8,16 +8,16 @@ Press button, turn knob to scroll the list to find your desired station.
 When your desired station is highlighted on the list, press to select.
 The station stream will be launched immediately.
 
-60 Minute Timer
-Timer is enable by default after a system reset. It can be disabled.
-Set volume to zero, then press button. Adjust volume to desired level.
-If the timer is disabled, the same procedure will enable it. The time
-remaining until auto-shutdown will display when changing the volume.
+Auto Shut-Down Timer
+If timer is enabled, the remaining time will show on status display.
+The timer can be enabled, disabled or its interval changed.
+Set volume to zero, then press button to toggle timer on or off.
+Set the volume to zero then double-click to change timer interval
+between 1 hour and 6 hours.
 
 
 Power Down the receiver
-Set volume to zero, press button 3 times within 3 seconds.
-Alternatively, set volume to zero then wait 5 seconds.
+Set volume to zero then wait 5 seconds.
 
 Turn ON the receiver after PowerDown
 Press button to power up. Adjust volume to desired level.
