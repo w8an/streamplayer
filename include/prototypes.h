@@ -1,0 +1,22 @@
+// Function prototypes
+void callbackSaveParams(void);
+void callbackMetadata(MetaDataType, const char*, int);
+void runSleepTimer(bool);
+void oledStatusDisplay(void);
+void StreamPortalMessage(void);
+void wifiPortalMessage(void);
+String timerTimeLeft(void);
+void changeTimerDuration(void);
+void menuDisplay(int);
+bool checkProtocol(int);
+int getSetting(const char*);
+void putSetting(const char*, int);
+void populateStreams(void);
+void populatePrefs(void);
+void putStreams(int, const char*, const char*);
+char* getStreamsTag(int);
+char* getStreamsUrl(int);
+void initializeStreams(void);
+String version(void);
+void systemPowerDown(void);
+void wipeNVS(void);
