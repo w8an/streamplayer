@@ -7,10 +7,10 @@
  * 
  * This program outputs icy/mp3 internet stream to max98357a i2c audio device(s).
  * Turn the knob to set volume. Press the button to change station.
- * Set volume to 0 then press button to set timer. Do again to cancel.
- * When device is powered up, an initial timer is set to 1 hour
- * Two clicks within 3 seconds with 0 volume puts cpu to sleep.
- * Set volume to 0 and system will sleep in 5 seconds.
+ * Set volume to 0 and wait 5 seconds and the system will shut-down.
+ * Device has a shut-off timer that can be set to 1 hour or 6 hours.
+ * One click with volume set to 0 toggles shut-down timer on/off.
+ * Two clicks within 3 seconds with volume at 0 changes timer interval setting.
  * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
  */
@@ -26,28 +26,7 @@
 #include "SSD1306Ascii.h"
 #include "SSD1306AsciiWire.h"
 #include <nvs_flash.h>
-
-// Function prototypes
-void saveParamsCallback(void);
-void metadataCallback(MetaDataType, const char*, int);
-void runSleepTimer(bool);
-void oledStatusDisplay(void);
-void StreamPortalMessage(void);
-void wifiPortalMessage(void);
-String timerTimeLeft(void);
-void menuDisplay(int);
-bool checkProtocol(int);
-int settingGet(const char*);
-void settingPut(const char*, int);
-void populateStreams(void);
-void populatePrefs(void);
-void streamsPut(int, const char*, const char*);
-char* streamsGetTag(int);
-char* streamsGetUrl(int);
-void initializeStreams(void);
-String version(void);
-void systemPowerDown(void);
-void wipeNVS(void);
+#include "prototypes.h"
 
 // display I/O
 #define I2C_ADDRESS 0x3C        // ssd1306 oled
@@ -67,13 +46,16 @@ void wipeNVS(void);
 
 // timer settings
 #define OLED_TIMER 5000         // display timeout in milliseconds
-#define SLEEP_TIMER 3600000     // one hour in milliseconds
+#define MS1HOUR   3600000       // 1 hour in milliseconds
+#define MS6HOUR  21600000       // 6 hours in ms
+#define MS12HOUR 43200000       // 12 hours in ms
 
-// System is hard coded to 25 streams (TOTAL_ITEMS)
+// System is hard coded to 36 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
-// the name and url elements are each STREAM_ELEMENT_SIZE in length
-#define STREAM_ITEM_SIZE 100          // line item width
-#define STREAM_ELEMENT_SIZE 50        // max length of name, url (49 char + nul)
+// the name and url elements are each STREAM_ELEMENT_SIZE in length.
+// The arrays stream_item[], tagElement[], and nameElement[] must have TOTAL_ITEMS strings. 
+#define STREAM_ELEMENT_SIZE 50        // max length of a name or url (each is 49 char + nul)
+#define STREAM_ITEM_SIZE 100          // line item width (two stream elements: the name & url)
 #define TOTAL_ITEMS 36                // number of line items in streamsX
 int currentIndex = 0;                 // stream pointer 
 char streamsX[TOTAL_ITEMS * STREAM_ITEM_SIZE]; // names & urls of stations
@@ -85,6 +67,8 @@ const char* portalName = "AetherStreamer"; // portal ssid
 const char* settings = "settings";    // general purpose namespace in prefs
 const char* listened = "listened";    // settings key of last listened to stream
 const char* audiovol = "volume";      // settings key of audio level
+const char* timerVal = "timerVal";    // 0 = 1 hour, else 6 hours
+const char* timerOn  = "timerOn";     // setting key of timer activity state
 const char* initPref = "initPref";    // key for initilization
 
 // user control I/O
@@ -158,7 +142,9 @@ const char* urlElement[] = {          // portal url element tags/titles
 };
 
 // globals
-long volLevel; // audio volume level
+long volLevel;                     // audio volume level
+bool timerRunning;                 // timer active state
+unsigned long sleepTimerDuration;  // user desired sleep time
 
 // portal elements
 WiFiManagerParameter* tagElementParam[TOTAL_ITEMS]; // Arrays to store pointers to tag objects
@@ -192,7 +178,7 @@ void setup() {
   oled.begin(&Adafruit128x32, I2C_ADDRESS);  // start oled
   oled.setFont(System5x7);
   //oled.setFont(lcd5x7);
-  
+
   if (digitalRead(NVS_CLR_PIN) == LOW) wipeNVS(); // user request to clear memory
 
   if (digitalRead(STREAM_PIN) == LOW) 
@@ -200,7 +186,7 @@ void setup() {
   populateStreams();       // fill streamsX array from prefs 
 
   // Reload the default streams if desired
-  currentIndex = settingGet(listened);  // get index of previous listened stream
+  currentIndex = getSetting(listened);  // get index of previous listened stream
 
   // Configure Wifi system
   wifiPortalMessage();
@@ -248,7 +234,7 @@ void setup() {
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
   rotaryEncoder.setBoundaries(0, 100, false); // minValue, maxValue, circular
-  rotaryEncoder.setEncoderValue(100-settingGet(audiovol));   // initial volume 
+  rotaryEncoder.setEncoderValue(100-getSetting(audiovol));   // initial volume 
   rotaryEncoder.setAcceleration(25);
   //rotaryEncoder.disableAcceleration();
 
@@ -264,10 +250,17 @@ void setup() {
 
   // Set up i2s based on sampling rate provided by decoder
   mp3decode.begin();
+  
+  // Get the sleep timer settings
+  if (getSetting(timerVal) == 0) sleepTimerDuration = MS1HOUR;
+  else sleepTimerDuration = MS6HOUR;
+
+  if (getSetting(timerOn) == 0) timerRunning = false;
+  else timerRunning = true;
 
   // Volume control
   volume.begin(config);   // config provides the bits_per_sample and channels
-  volLevel = settingGet(audiovol);     // get the saved volume level
+  volLevel = getSetting(audiovol);     // get the saved volume level
   volume.setVolume(volLevel / 100.0);  // set that volume
 }
 
@@ -291,7 +284,6 @@ long volumePos;
 
 // sleep timer status and timing
 bool systemSleeping = false;
-bool timerRunning = true;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
 
@@ -330,14 +322,14 @@ void loop() {
 
       if (checkProtocol(currentIndex)) {
         // url seems ok
-        urlstream.begin(streamsGetUrl(currentIndex));
-        urlstream.setMetadataCallback(metadataCallback); // metadata processor
-        settingPut(listened, currentIndex);              // save current selection
+        urlstream.begin(getStreamsUrl(currentIndex));
+        urlstream.setMetadataCallback(callbackMetadata); // metadata processor
+        putSetting(listened, currentIndex);              // save current selection
         systemStreaming = true;
       }
       else { 
         // url string length is too short
-        currentIndex = settingGet(listened); // get previous stream
+        currentIndex = getSetting(listened); // get previous stream
         menuIndex = currentIndex;  // reset menu display pointer
         oled.clear();
         oled.println(F("ERROR\nMissing URL\nReverting"));
@@ -357,11 +349,8 @@ void loop() {
 
         if (timerRunning & (sleepCurrentTime - sleepStartTime) < 3000) {
           // If user presses button within 3 seconds of timer set (twice 
-          // in 3 seconds) when the volume is zero, then fall into cpu 
-          // light-sleep mode. Note that if the timer is running, then the 
-          // first click will be caught by the timer cancel code. It then
-          // takes 2 more clicks to power down.
-          systemPowerDown();
+          // in 3 seconds) when the volume is zero, then change timer duration.
+          changeTimerDuration();
         }
 
         else {
@@ -373,8 +362,8 @@ void loop() {
           else {
             runSleepTimer(true);
             oled.println(F("TIMER SET")); 
-            oled.print(SLEEP_TIMER/60000); // convert to minutes
-            oled.println(F(" minutes"));  
+            oled.print(timerTimeLeft());
+            
           }
         }
 
@@ -426,7 +415,6 @@ void loop() {
         // volLevel value will be saved when oled timeout occurs
         volLevel = 100 - rotaryEncoder.readEncoder();
         volume.setVolume(volLevel / 100.0); // set speaker level
-        //settingPut(audiovol, volLevel);   // store the setting (moved)
         oledStatusDisplay();  
       }
 
@@ -435,10 +423,12 @@ void loop() {
     }
   }
 
-  // Turn off oled after a few seconds.
-  // Also save volume level here to avoid overusing the prefs data write
   oledCurrentTime = millis();
   if (displayOn) {
+    // Turn off oled after a few seconds.
+    // Save volume level into prefs data if changed.
+    // Indicate portal status if it is active.
+    // Shut-down system if directed.
 
     if (oledCurrentTime - oledStartTime > OLED_TIMER) {
 
@@ -457,8 +447,8 @@ void loop() {
       if (volLevel == 0) systemPowerDown(); // Put into sleep mode
 
       // Store volume level only after user has settled on a value
-      if (volLevel != settingGet(audiovol)) 
-        settingPut(audiovol, volLevel);  // store the setting 
+      if (volLevel != getSetting(audiovol)) 
+        putSetting(audiovol, volLevel);  // store the setting 
     }
   }
 
@@ -467,7 +457,7 @@ void loop() {
     
     // watch for timeout
     sleepCurrentTime = millis();
-    if (sleepCurrentTime - sleepStartTime > SLEEP_TIMER) {
+    if (sleepCurrentTime - sleepStartTime > sleepTimerDuration) {
 
       // timer has expired, go to sleep (silent idle mode)
       urlstream.end();         // stop stream download
@@ -499,19 +489,19 @@ void loop() {
         // only instantiate new parameter objects if they have not yet been created
         firstPortal = false;
         for (int i=0; i<TOTAL_ITEMS; i++) {
-          tagElementParam[i] = new WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
-          urlElementParam[i] = new WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
+          tagElementParam[i] = new WiFiManagerParameter{tagElement[i], nameElement[i], getStreamsTag(i), STREAM_ELEMENT_SIZE-1};
+          urlElementParam[i] = new WiFiManagerParameter{urlElement[i], urlElement[i], getStreamsUrl(i), STREAM_ELEMENT_SIZE-1};
           wifiMan.addParameter(tagElementParam[i]);
           wifiMan.addParameter(urlElementParam[i]);
         }
       }
       else {
         for (int i=0; i<TOTAL_ITEMS; i++) {
-          WiFiManagerParameter{tagElement[i], nameElement[i], streamsGetTag(i), STREAM_ELEMENT_SIZE-1};
-          WiFiManagerParameter{urlElement[i], urlElement[i], streamsGetUrl(i), STREAM_ELEMENT_SIZE-1};
+          WiFiManagerParameter{tagElement[i], nameElement[i], getStreamsTag(i), STREAM_ELEMENT_SIZE-1};
+          WiFiManagerParameter{urlElement[i], urlElement[i], getStreamsUrl(i), STREAM_ELEMENT_SIZE-1};
         }
       }
-      wifiMan.setSaveParamsCallback(saveParamsCallback);  // param web page save event
+      wifiMan.setSaveParamsCallback(callbackSaveParams);  // param web page save event
       wifiMan.startWebPortal();
       portalMode = PORTAL_UP; 
       StreamPortalMessage();
@@ -521,7 +511,7 @@ void loop() {
 
         // Store data fields from portal into streamsX array
         for (int i=0; i<TOTAL_ITEMS; i++) {
-          streamsPut(i, tagElementParam[i]->getValue(), urlElementParam[i]->getValue()); 
+          putStreams(i, tagElementParam[i]->getValue(), urlElementParam[i]->getValue()); 
         }
         // Save changes to the prefs database
         populatePrefs();  
@@ -565,10 +555,11 @@ void loop() {
  *
  */
 
+
 /*
  * Parameter web page callback function
  */
-void saveParamsCallback(void) {
+void callbackSaveParams(void) {
   // called when the SAVE button is clicked on the 
   // portal parameter web page -> http://<local_ip>/param
 
@@ -579,7 +570,7 @@ void saveParamsCallback(void) {
 /*
  * Metadata callback function
  */
-void metadataCallback(MetaDataType type, const char* str, int len) {
+void callbackMetadata(MetaDataType type, const char* str, int len) {
   // called when stream metadata is available
   // note that ICYStream must be used
 
@@ -588,8 +579,10 @@ void metadataCallback(MetaDataType type, const char* str, int len) {
   Serial.print(": ");
   Serial.println(str);
 
-/*  INCOMPLETE * * *
+/*  
+  * * * CURRENTLY NOT USED * * *
 
+  // Note: This may be incorrect for current libary metadata strings
   // Example: Extract the "StreamTitle" field
   int titleStart = metadata.indexOf("StreamTitle='");
   if (titleStart != -1) {
@@ -612,7 +605,9 @@ void runSleepTimer(bool enabled) {
   timerRunning = enabled;
   if (enabled) {
     sleepStartTime = millis();  // sleep timer baseline
+    putSetting(timerOn, 1);     // set pref to enabled 
   }
+  else putSetting(timerOn, 0);  // set pref to disabled
 }
 
 
@@ -623,20 +618,29 @@ void oledStatusDisplay(void) {
 
   int dBm = WiFi.RSSI();
   oled.clear();
-  oled.println(streamsGetTag(currentIndex)); // stream name
-  if (timerRunning) {
-    oled.print(F("timer : "));
-    oled.println(timerTimeLeft());
+  if (volLevel > 0) {
+    oled.println(getStreamsTag(currentIndex)); // stream name
+    if (timerRunning) {
+      oled.print(F("timer : "));
+      oled.println(timerTimeLeft());
+    }
+    oled.print(F("signal: "));
+    oled.print(dBm); 
+    if (dBm >= -30)  oled.println(F(" excellent"));
+    else if (dBm >= -67 ) oled.println(F(" good"));
+      else if (dBm >= -70 ) oled.println(F(" fair"));
+        else if (dBm >= -80 ) oled.println(F(" weak"));
+          else oled.println(F(" very weak"));
+    oled.print(F("volume: "));
+    oled.print(volLevel);
   }
-  oled.print(F("signal: "));
-  oled.print(dBm); 
-  if (dBm >= -30)  oled.println(F(" excellent"));
-  else if (dBm >= -67 ) oled.println(F(" good"));
-    else if (dBm >= -70 ) oled.println(F(" fair"));
-      else if (dBm >= -80 ) oled.println(F(" weak"));
-        else oled.println(F(" very weak"));
-  oled.print(F("volume: "));
-  oled.print(volLevel);
+  else {
+    oled.clear();
+    oled.println(F("ZERO FUNCTION"));
+    oled.println(F("Click for Timer"));
+    oled.println(F(" or"));
+    oled.print(F("Wait for Shutdown"));
+  }
 }
 
 
@@ -667,16 +671,22 @@ void wifiPortalMessage(void) {
 
 
 /*
- * Return the minutes left on the timer
+ * Return a formatted string of time remaining on shut-off timer
  */
 String timerTimeLeft(void) {
 
     sleepCurrentTime = millis(); // set baseline
+    unsigned long totalSeconds = 
+                  sleepTimerDuration/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
+    unsigned long hours = totalSeconds / 3600;
+    unsigned long minutes = (totalSeconds % 3600) / 60;
 
-    // calculate time left
-    long totalSeconds = SLEEP_TIMER/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
-    int minutes = (totalSeconds % 3600) / 60;
-    return String(minutes) + " mins";
+    char timeString[10]; // Buffer for formatted string
+    if (hours < 1) return String(minutes) + " mins";
+    else {
+      snprintf(timeString, sizeof(timeString), "%2lu:%02lu", hours, minutes);
+      return String(timeString);
+    }
 }
 
 
@@ -686,19 +696,19 @@ String timerTimeLeft(void) {
 void menuDisplay(int menuIndex) {
   
   oled.clear();
-  oled.println(streamsGetTag(currentIndex));  // title line
+  oled.println(getStreamsTag(currentIndex));  // title line
 
   // previous line item
   int lineIndex = (menuIndex == 0 ? (TOTAL_ITEMS-1) : menuIndex-1);
   //oled.print(F(" ")); // indent
-  if (checkProtocol(lineIndex)) oled.println(streamsGetTag(lineIndex));
+  if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
   else oled.println(lineIndex+1); // print only line number if error
   
   // current line item
   if (checkProtocol(menuIndex)) {  // selection line
     oled.setInvertMode(true);
     //oled.print(F(">")); // current item pointer
-    oled.println(streamsGetTag(menuIndex));
+    oled.println(getStreamsTag(menuIndex));
     oled.setInvertMode(false);
   } 
   else {
@@ -709,7 +719,7 @@ void menuDisplay(int menuIndex) {
   // next line item
   lineIndex = (menuIndex == (TOTAL_ITEMS-1) ? 0 : menuIndex+1);
   //oled.print(F(" ")); // indent
-  if (checkProtocol(lineIndex)) oled.println(streamsGetTag(lineIndex));
+  if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
   else oled.print(lineIndex+1);
 }
 
@@ -718,14 +728,33 @@ void menuDisplay(int menuIndex) {
  * Return true if the url protocol text is correct
  */
 bool checkProtocol(int menuIndex) {
-  return strncmp(streamsGetUrl(menuIndex), "http://", 7) == 0;
+  return strncmp(getStreamsUrl(menuIndex), "http://", 7) == 0;
+}
+
+
+/*
+ * Set timer duration to user selected value
+ */
+void changeTimerDuration(void) {
+  // Rotate to next timer value
+  // 1 hour or 6 hours
+  int settingVal = getSetting(timerVal);
+  if (settingVal == 0) {  // was 1 hour, set to 6 hours
+    settingVal = 1;     
+    sleepTimerDuration = MS6HOUR;
+  }
+  else {               // set to 1 hour
+    settingVal = 0;                     
+    sleepTimerDuration = MS1HOUR;
+  }
+  putSetting(timerVal, settingVal);
 }
 
 
 /*
  * Retrieve a persistent preference setting
  */
-int settingGet(const char* setting) {
+int getSetting(const char* setting) {
   prefs.begin(settings, PREF_RO);
   int settingVal = prefs.getInt(setting, 0); // default = 0
   prefs.end();
@@ -736,7 +765,7 @@ int settingGet(const char* setting) {
 /*
  * Store a persistent preference setting
  */
-void settingPut(const char* setting, int settingVal) {
+void putSetting(const char* setting, int settingVal) {
   prefs.begin(settings, PREF_RW);
   prefs.putInt(setting, settingVal);
   prefs.end();
@@ -770,7 +799,7 @@ void populateStreams(void) {
     if (!prefs.isKey(stream_type[TYPE_TAG])) prefs.putString(stream_type[TYPE_TAG], "");
     if (!prefs.isKey(stream_type[TYPE_URL])) prefs.putString(stream_type[TYPE_URL], "");
     // get the values and place in streamsX array
-    streamsPut(item, prefs.getString(stream_type[TYPE_TAG]).c_str(), 
+    putStreams(item, prefs.getString(stream_type[TYPE_TAG]).c_str(), 
                      prefs.getString(stream_type[TYPE_URL]).c_str());
     prefs.end();
   }
@@ -784,8 +813,8 @@ void populatePrefs(void) {
   for (int item=0; item < TOTAL_ITEMS; item++) {
     prefs.begin(stream_item[item], PREF_RW); 
     prefs.clear();
-    prefs.putString(stream_type[TYPE_TAG], streamsGetTag(item));
-    prefs.putString(stream_type[TYPE_URL], streamsGetUrl(item));
+    prefs.putString(stream_type[TYPE_TAG], getStreamsTag(item));
+    prefs.putString(stream_type[TYPE_URL], getStreamsUrl(item));
     prefs.end();
   }
 }
@@ -794,7 +823,7 @@ void populatePrefs(void) {
 /*
  * Put the stream tag and url strings into the streamsX array
  */
-void streamsPut(int index, const char* tag, const char* url) {
+void putStreams(int index, const char* tag, const char* url) {
   strncpy( streamsX + (index * STREAM_ITEM_SIZE), tag, STREAM_ELEMENT_SIZE );
   strncpy( streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE), url, STREAM_ELEMENT_SIZE );
 }
@@ -803,7 +832,7 @@ void streamsPut(int index, const char* tag, const char* url) {
 /*
  * Get the name tag string from the streamsX array at index
  */
-char* streamsGetTag(int index) { // index = 0..TOTAL_ITEMS-1
+char* getStreamsTag(int index) { // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE);
 }
 
@@ -811,7 +840,7 @@ char* streamsGetTag(int index) { // index = 0..TOTAL_ITEMS-1
 /*
  * Get the url string from the streamsX array at index
  */
-char* streamsGetUrl(int index) { // index = 0..TOTAL_ITEMS-1
+char* getStreamsUrl(int index) { // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE);
 }
 
@@ -883,11 +912,12 @@ void initializeStreams(void) {
     oled.setCursor(0, 3);
     oled.print(stream_data[item*2]);
   }
-  settingPut(listened, 0);  // default to first stream
+  putSetting(listened, 0);  // default to first stream
 }
 
+
 /*
- * Create a version tag from compile time
+ * Create a version tag derived from the compile time
  */
 String version(void) {
   // Extract date and time from __DATE__ and __TIME__
@@ -927,7 +957,7 @@ String version(void) {
  * Put CPU to sleep. Reboot when wake up requested.
  */
 void systemPowerDown(void) {
-  oled.print(F("SYSTEM POWER DOWN\n\nv.")); // status notification
+  oled.print(F("SYSTEM POWER DOWN\nClick to Restart\n\nv.")); // notification
   oled.print(version());
   urlstream.end();          // stop stream download
   systemStreaming = false;  // set state signals
@@ -956,7 +986,7 @@ void wipeNVS(void) {
   nvs_flash_erase();      // erase the NVS partition and...
   nvs_flash_init();       // initialize the NVS partition.
   oled.println(F("Complete"));
-  oled.printf("Unshort D%d pin", NVS_CLR_PIN);
+  oled.printf("Remove D%d jumper", NVS_CLR_PIN);
   while (true);           // loop forever
 }
 
