@@ -71,6 +71,11 @@ const char* timerVal = "timerVal";    // 0 = 1 hour, else 6 hours
 const char* timerOn  = "timerOn";     // setting key of timer activity state
 const char* initPref = "initPref";    // key for initilization
 
+// MAX98357 I2S audio board pins
+#define MAX_DIN 22   // serial data
+#define MAX_LRC 25   // word select
+#define MAX_BCLK 26  // serial clock
+
 // user control I/O
 #define ROTARY_ENCODER_A_PIN 33       // clk
 #define ROTARY_ENCODER_B_PIN 32       // dt  
@@ -143,7 +148,7 @@ const char* urlElement[] = {          // portal url element tags/titles
 
 // globals
 long volLevel;                     // audio volume level
-bool timerRunning;                 // timer active state
+bool timerIsRunning;                 // timer active state
 unsigned long sleepTimerDuration;  // user desired sleep time
 
 // portal elements
@@ -191,13 +196,16 @@ void setup() {
   // Configure Wifi system
   wifiPortalMessage();
   wifiMan.setDebugOutput(false);  // true if you want send to serial debug
-  if (digitalRead(PORTAL_PIN) == LOW) {
+  if (digitalRead(PORTAL_PIN) == LOW) {  // call for portal
+
     Serial.println(F("User requested WiFi configuration portal"));
     //wifiMan.resetSettings();     // erase wifi configuration
     wifiPortalMessage();
     wifiMan.startConfigPortal(portalName); 
   }
-  else {
+
+  else { // configuration portal has not been requested.
+
     // Tries to connect to the last known network. Launches a
     // captive portal if the connection fails or the timeout is reached.
     if(wifiMan.autoConnect(portalName)) {   
@@ -217,7 +225,8 @@ void setup() {
         }
         oled.clear();
     } 
-    else {
+
+    else {  // wifi autoconnect failed
       Serial.println(F("Failed to connect to WiFi."));
       oled.clear();
       oled.print(F("CONNECT FAIL\nWiFi Error\nRestarting..."));
@@ -227,7 +236,7 @@ void setup() {
   }
 
   oled.clear();
-  oled.print(F("Aether Streamer\nSteven R Stuart\nW8AN"));
+  oled.print(F("Aether Streamer\nSteven R Stuart\n\n"));
   //oled.print(version());
 
   // Keyes KY-040
@@ -243,20 +252,17 @@ void setup() {
 
   // Output stream configuration
   auto config = i2s.defaultConfig(TX_MODE);
-  config.pin_bck = 26;  // BCLK  -max98357 pins
-  config.pin_ws  = 25;  // LRC
-  config.pin_data = 22; // DIN
+  config.pin_bck  = MAX_BCLK; // serial clock (MAX98357 pins)
+  config.pin_ws   = MAX_LRC;  // word select
+  config.pin_data = MAX_DIN;  // serial data
   i2s.begin(config);
 
   // Set up i2s based on sampling rate provided by decoder
   mp3decode.begin();
   
   // Get the sleep timer settings
-  if (getSetting(timerVal) == 0) sleepTimerDuration = MS1HOUR;
-  else sleepTimerDuration = MS6HOUR;
-
-  if (getSetting(timerOn) == 0) timerRunning = false;
-  else timerRunning = true;
+  assignTimerValsFromPrefs();
+  //displayTimerEnabledSetting();  // shows enable state and timer duration value
 
   // Volume control
   volume.begin(config);   // config provides the bits_per_sample and channels
@@ -270,7 +276,7 @@ void setup() {
  */
 
 // oled screen status and blanking timing
-bool displayOn = true;
+bool displayIsOn = true;
 unsigned long oledStartTime; 
 unsigned long oledCurrentTime = 0;   
 
@@ -278,12 +284,13 @@ unsigned long oledCurrentTime = 0;
 bool systemStreaming = false;
 
 // menu vars
-bool menuOpen = false;
+bool streamSelectionMenuIsOpen = false;
 int menuIndex = currentIndex;
 long volumePos;
 
 // sleep timer status and timing
-bool systemSleeping = false;
+bool systemIsSleeping = false;
+bool timerInSetupMode = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
 
@@ -298,23 +305,23 @@ bool firstPortal = true;
  * 
  */
 void loop() {
-  if (systemSleeping) {
+  if (systemIsSleeping) {
     
     if (rotaryEncoder.isEncoderButtonClicked() ||
         rotaryEncoder.encoderChanged()) {
 
       // wake from sleep
-      systemSleeping = false;
-      runSleepTimer(timerRunning);  // reset timer
+      systemIsSleeping = false;
+      sleepStartTime = millis();  // reset sleep timer baseline
 
       oled.clear();
       oled.println(F("WAKE UP"));
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // tickle the display timer
     }
 
   }
-  else {
+  else { // system is active
 
     if (systemStreaming) copier.copy();  // Run the open audio stream
     
@@ -322,83 +329,107 @@ void loop() {
 
       if (checkProtocol(currentIndex)) {
         // url seems ok
+
         urlstream.begin(getStreamsUrl(currentIndex));
         urlstream.setMetadataCallback(callbackMetadata); // metadata processor
         putSetting(listened, currentIndex);              // save current selection
         systemStreaming = true;
       }
-      else { 
-        // url string length is too short
+      else { // url string error
+        
+        // url string is not recognized
         currentIndex = getSetting(listened); // get previous stream
         menuIndex = currentIndex;  // reset menu display pointer
         oled.clear();
         oled.println(F("ERROR\nMissing URL\nReverting"));
       }
 
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // reset display timer
     }
 
     if (rotaryEncoder.isEncoderButtonClicked()) { 
-      // button was pressed
+      // button was clicked
+      
+      if (volLevel == 0) { 
+        // button clicked and volume is zero
+        // enter the timer configuration
 
-      if (volLevel == 0) {
-        // Handle timer or sleep mode
+        // turn the speaker audio on
+        volLevel = getSetting(audiovol);     // get the saved volume level
+        volume.setVolume(volLevel / 100.0);  // set that volume
+        volumePos = rotaryEncoder.readEncoder(); // get encoder setting
+
+        timerInSetupMode = true;
+
         oled.clear();
-        sleepCurrentTime = millis();
+        oled.println(F("TIMER"));
+        displayTimerEnabledSetting();     // show prefs values
+        if (getSetting(timerOn) != 0) displayTimerValSetting(); 
 
-        if (timerRunning & (sleepCurrentTime - sleepStartTime) < 3000) {
-          // If user presses button within 3 seconds of timer set (twice 
-          // in 3 seconds) when the volume is zero, then change timer duration.
-          changeTimerDuration();
-        }
-
-        else {
-          // Set or reset sleep timer when volume is zero
-          if (timerRunning) {
-            runSleepTimer(false);
-            oled.println(F("CANCEL TIMER"));
-          }
-          else {
-            runSleepTimer(true);
-            oled.println(F("TIMER SET")); 
-            oled.print(timerTimeLeft());
-            
-          }
-        }
-
-        displayOn = true;
-        oledStartTime = millis(); // tickle the display timer
       }
 
-      else {
-        if (menuOpen) { 
-          // close the menu, prepare selected stream
-          menuOpen = false;
-          rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
-          currentIndex = menuIndex;  // user chose this stream
-          urlstream.end();           // stop stream download
-          systemStreaming = false;   // signal that another stream is selected
-          oledStatusDisplay();
+      else {  
+        // button was clicked and volume is not zero
+
+        if (timerInSetupMode) {
+          // Store and activate timer setting
+
+          timerInSetupMode = false;
+          oled.clear();
+          oled.println(F("* SAVE TIMER"));
+          
+          if (timerIsRunning) {  // user selected a timer duration
+
+            sleepStartTime = millis();  // sleep timer baseline
+            putSetting(timerVal, timerDurationToValue(sleepTimerDuration)); // store prefs
+            putSetting(timerOn, 1);
+            displayTimerDurationSetting();
+          }
+          else { // user disabled the timer
+
+            putSetting(timerOn, 0);
+            displayTimerEnabledSetting();  // show saved prefs
+          }
+
+          rotaryEncoder.setEncoderValue(100-getSetting(audiovol)); // restore encoder position 
         }
 
         else { 
-          // open the menu, select a stream
-          menuOpen = true;
-          volumePos = rotaryEncoder.readEncoder(); // get volume setting
-          rotaryEncoder.setEncoderValue(50);       // initialize position
-          menuDisplay(currentIndex);  // show stream selection list
+          // button was clicked, volume is not zero, and timer is not in setup mode
+
+          if (streamSelectionMenuIsOpen) { 
+
+            // close the menu, prepare selected stream
+            streamSelectionMenuIsOpen = false;
+            rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
+            currentIndex = menuIndex;  // user chose this stream
+            urlstream.end();           // stop stream download
+            systemStreaming = false;   // signal that another stream is selected
+            oledStatusDisplay();
+          }
+
+          else { // stream selection menu is not open
+
+            // open the menu, select a stream
+            streamSelectionMenuIsOpen = true;
+            volumePos = rotaryEncoder.readEncoder(); // get volume setting
+            rotaryEncoder.setEncoderValue(50);       // initialize position
+            displayStreamMenu(currentIndex);  // show stream selection list
+          }
         }
       }
 
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // tickle the display timer
     }
   
-    if (rotaryEncoder.encoderChanged()) {   // knob has turned
+    if (rotaryEncoder.encoderChanged()) {   // knob has been turned
 
-      if (menuOpen) {  
+      if (streamSelectionMenuIsOpen) { 
+        // knob has turned and stream selection menu is open
         // scroll the menu
+
         long encoderCurrPos = rotaryEncoder.readEncoder();
         if (encoderCurrPos > 50) menuIndex--; // determine direction
         else menuIndex++;
@@ -407,52 +438,91 @@ void loop() {
         if (menuIndex >= (TOTAL_ITEMS-1)) menuIndex = 0; // wrap around
         if (menuIndex < 0) menuIndex = TOTAL_ITEMS-1;
 
-        menuDisplay(menuIndex);  // show stream selection list
+        displayStreamMenu(menuIndex);  // show stream selection list
       }
 
       else { 
-        // Menu is not open, so set the volume level
-        // volLevel value will be saved when oled timeout occurs
-        volLevel = 100 - rotaryEncoder.readEncoder();
-        volume.setVolume(volLevel / 100.0); // set speaker level
-        oledStatusDisplay();  
+        // knob has turned and stream selection menu is not open
+
+        if (timerInSetupMode) { 
+          // choose the next timer setting
+
+          oled.clear(); 
+          oled.println(F("SET TIMER"));
+          oled.println();
+          changeTimerDuration();          // select next duration
+
+          if (timerIsRunning == false) oled.println(F("Disabled"));
+          else displayTimerDurationSetting();  
+        }
+
+        else { // knob has turned, but not setting timer, and not selecting stream
+          // default function for encoder change
+
+          // adjust the volume level
+          // volLevel value will be saved when oled timeout occurs
+          volLevel = 100 - rotaryEncoder.readEncoder();
+          volume.setVolume(volLevel / 100.0); // set speaker level
+          oledStatusDisplay();  
+        }
       }
 
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // tickle the display timer
     }
   }
 
   oledCurrentTime = millis();
-  if (displayOn) {
+  if (displayIsOn) {
     // Turn off oled after a few seconds.
     // Save volume level into prefs data if changed.
     // Indicate portal status if it is active.
     // Shut-down system if directed.
 
     if (oledCurrentTime - oledStartTime > OLED_TIMER) {
+      // oled timer has expired
 
-      // oled timer has expired, turn it off
-      if (menuOpen) {
-        menuOpen = false;
+      if (streamSelectionMenuIsOpen) {
+
+        streamSelectionMenuIsOpen = false;
         menuIndex = currentIndex;  // no selection, reset menu display pointer
         rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
       }
 
       oled.clear();  // blank the display
-      displayOn = false;
+      displayIsOn = false;
 
       if (portalMode == PORTAL_UP) StreamPortalMessage(); // an override message
 
-      if (volLevel == 0) systemPowerDown(); // Put into sleep mode
+      if (volLevel == 0) {
+        systemPowerDown(); // Put into sleep mode
+      }
 
+      if (timerInSetupMode) {
+  
+        timerInSetupMode = false;
+        oled.println(F("TIMER"));
+        oled.println(F("Not Changed"));
+
+        // restore the timer settings from prefs
+        assignTimerValsFromPrefs();
+        displayTimerEnabledSetting();  // show the saved prefs
+        displayTimerValSetting();
+
+        rotaryEncoder.setEncoderValue(100-getSetting(audiovol)); // restore encoder position 
+
+        displayIsOn = true;
+        oledStartTime = millis();     // tickle the display timer
+      }
+      
       // Store volume level only after user has settled on a value
       if (volLevel != getSetting(audiovol)) 
         putSetting(audiovol, volLevel);  // store the setting 
+
     }
   }
 
-  if (!systemSleeping && timerRunning) { 
+  if (!systemIsSleeping && timerIsRunning) { 
     // system is awake and timer is running
     
     // watch for timeout
@@ -462,11 +532,11 @@ void loop() {
       // timer has expired, go to sleep (silent idle mode)
       urlstream.end();         // stop stream download
       systemStreaming = false; // set state signals
-      systemSleeping = true;
+      systemIsSleeping = true;
 
       oled.clear();
       oled.println(F("SLEEPING"));
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // tickle the display timer
     }
   }
@@ -481,6 +551,7 @@ void loop() {
   
   if (portalSwitch) { 
     // user call for portal
+
     if (portalMode == PORTAL_DOWN) { 
       // start the portal
 
@@ -495,18 +566,23 @@ void loop() {
           wifiMan.addParameter(urlElementParam[i]);
         }
       }
-      else {
+
+      else { // portal settings have already been created
+
         for (int i=0; i<TOTAL_ITEMS; i++) {
           WiFiManagerParameter{tagElement[i], nameElement[i], getStreamsTag(i), STREAM_ELEMENT_SIZE-1};
           WiFiManagerParameter{urlElement[i], urlElement[i], getStreamsUrl(i), STREAM_ELEMENT_SIZE-1};
         }
       }
+
       wifiMan.setSaveParamsCallback(callbackSaveParams);  // param web page save event
       wifiMan.startWebPortal();
       portalMode = PORTAL_UP; 
       StreamPortalMessage();
     }
-    else { 
+
+    else { // portal is not down
+
       if (portalMode == PORTAL_SAVE) { 
 
         // Store data fields from portal into streamsX array
@@ -525,14 +601,14 @@ void loop() {
 
         oled.clear();
         oled.println(F("SAVED"));
-        displayOn = true;
+        displayIsOn = true;
         oledStartTime = millis(); // reset display timer
       }
     }
 
   }
-  else {
-    // switch is off
+  else { // portal switch is off
+    
     if (portalMode != PORTAL_DOWN) {
       // force portal shutdown
 
@@ -541,7 +617,7 @@ void loop() {
 
       oled.clear();
       oled.print(F("PORTAL DOWN"));
-      displayOn = true;
+      displayIsOn = true;
       oledStartTime = millis(); // reset display timer
     }
   }
@@ -598,20 +674,6 @@ void callbackMetadata(MetaDataType type, const char* str, int len) {
 
 
 /*
- * Enable or disable sleep timer
- */
-void runSleepTimer(bool enabled) {
-  // enabled = true to set, false to clear
-  timerRunning = enabled;
-  if (enabled) {
-    sleepStartTime = millis();  // sleep timer baseline
-    putSetting(timerOn, 1);     // set pref to enabled 
-  }
-  else putSetting(timerOn, 0);  // set pref to disabled
-}
-
-
-/*
  * Display the timer, signal, volume level
  */
 void oledStatusDisplay(void) {
@@ -620,7 +682,7 @@ void oledStatusDisplay(void) {
   oled.clear();
   if (volLevel > 0) {
     oled.println(getStreamsTag(currentIndex)); // stream name
-    if (timerRunning) {
+    if (timerIsRunning) {
       oled.print(F("timer : "));
       oled.println(timerTimeLeft());
     }
@@ -693,7 +755,7 @@ String timerTimeLeft(void) {
 /*
  * Display the stream selection menu
  */
-void menuDisplay(int menuIndex) {
+void displayStreamMenu(int menuIndex) {
   
   oled.clear();
   oled.println(getStreamsTag(currentIndex));  // title line
@@ -725,29 +787,137 @@ void menuDisplay(int menuIndex) {
 
 
 /*
- * Return true if the url protocol text is correct
+ * Set system timer settings from stored values
  */
-bool checkProtocol(int menuIndex) {
-  return strncmp(getStreamsUrl(menuIndex), "http://", 7) == 0;
+void assignTimerValsFromPrefs(void) {
+  switch (getSetting(timerVal)) {
+    case 1: sleepTimerDuration = MS6HOUR; break;
+    case 2: sleepTimerDuration = MS12HOUR; break;
+    default: sleepTimerDuration = MS1HOUR;
+  }
+  if (getSetting(timerOn) == 1) timerIsRunning = true;
+  else timerIsRunning = false;
 }
 
 
 /*
- * Set timer duration to user selected value
+ * Display the timer enabled setting at current oled cursor position
+ */
+void displayTimerEnabledSetting(void) {
+  // show the pref setting
+  if (getSetting(timerOn) == 0) timerEnabledText(false);
+  else timerEnabledText(true);
+}
+
+
+/*
+ * Timer display text logic
+ */
+void displayTimerIsRunningSetting(void) {
+  // show the running setting
+  if (timerIsRunning) timerEnabledText(true);
+  else timerEnabledText(false);
+}
+
+
+/*
+ * Output the timer enabled state text
+ */
+void timerEnabledText(bool en) {
+  if (en) oled.println(F("Enabled"));
+  else oled.println(F("Disabled"));
+}
+
+
+/*
+ * Display the timer duration pref setting at current oled cursor position
+ */
+void displayTimerValSetting(void) {
+  // from pref
+  timerDurationText(getSetting(timerVal));
+}
+
+
+/*
+ * Timer duration text logic
+ */
+void displayTimerDurationSetting(void) {    
+  // current time length setting
+  timerDurationText(timerDurationToValue(sleepTimerDuration));
+}
+
+
+/*
+ * Output the timer duration text
+ */
+void timerDurationText(int durval) { 
+
+  switch (durval) {
+    case 1: oled.println(F("6 hours")); break;
+    case 2: oled.println(F("12 hours")); break;
+    default: oled.println(F("1 hour")); //MS1HOUR
+  }
+}
+
+
+/*
+ * Rotate to next timer duration or disable
  */
 void changeTimerDuration(void) {
   // Rotate to next timer value
-  // 1 hour or 6 hours
-  int settingVal = getSetting(timerVal);
-  if (settingVal == 0) {  // was 1 hour, set to 6 hours
-    settingVal = 1;     
-    sleepTimerDuration = MS6HOUR;
+
+  if (timerIsRunning == false) {
+    timerIsRunning = true;  
+    sleepTimerDuration = MS1HOUR;  // 1 hr en
+  } 
+  else {
+    switch (sleepTimerDuration) {
+      case MS1HOUR:
+        sleepTimerDuration = MS6HOUR;
+        break;
+      case MS6HOUR: 
+        sleepTimerDuration = MS12HOUR;
+        break;
+      case MS12HOUR:
+        sleepTimerDuration = MS1HOUR; 
+        timerIsRunning = false;
+        break;
+    }
   }
-  else {               // set to 1 hour
-    settingVal = 0;                     
-    sleepTimerDuration = MS1HOUR;
+}
+
+
+/*
+ * Convert timer pref value to duration
+ */
+unsigned long timerValueToDuration(int settingVal) {
+  // prefs timerVal to duration
+  switch (settingVal) {
+    case 1: return MS6HOUR; 
+    case 2: return MS12HOUR;
   }
-  putSetting(timerVal, settingVal);
+  return MS1HOUR;  // case 0
+}
+
+
+/*
+ * Convert timer duration to pref value
+ */
+int timerDurationToValue(unsigned long duration) {
+  // duration to prefs timerVal
+  switch (duration) {
+    case MS6HOUR: return 1;
+    case MS12HOUR: return 2;
+  }
+  return 0;
+}
+
+
+/*
+ * Return true if the url protocol text is correct
+ */
+bool checkProtocol(int menuIndex) {
+  return strncmp(getStreamsUrl(menuIndex), "http://", 7) == 0;
 }
 
 
@@ -776,8 +946,8 @@ void putSetting(const char* setting, int settingVal) {
  * Load the streamsX array with streams that are saved in prefs object
  */
 void populateStreams(void) {  
-  // This function will initialize default streams when nvs is blank
-  // You can manually re-load the default streams by pulling STREAM_PIN low at boot.
+  // This function will initialize default streams and timer when nvs is blank
+  // You can manually re-load the defaults by pulling STREAM_PIN low at boot.
 
   // place a marker key to indicate that the prefs is populated
   prefs.begin(settings, PREF_RO);
@@ -790,6 +960,10 @@ void populateStreams(void) {
     prefs.putInt(initPref, 1);   // create the test key
     prefs.end(); 
     initializeStreams();
+    
+    // set default timer values
+    putSetting(timerOn, 1);   // timer enabled
+    putSetting(timerVal, 0);  // 1 hour 
   }
 
   // fill steamsX with names and urls from prefs
@@ -961,7 +1135,7 @@ void systemPowerDown(void) {
   oled.print(version());
   urlstream.end();          // stop stream download
   systemStreaming = false;  // set state signals
-  systemSleeping = true;
+  systemIsSleeping = true;
   esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
   esp_wifi_stop();          // shut down wifi
   delay(OLED_TIMER);
