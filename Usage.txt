@@ -11,17 +11,15 @@ The station stream will be launched immediately.
 Auto Shut-Down Timer
 If timer is enabled, the remaining time will show on status display.
 The timer can be enabled, disabled or its interval changed.
-Set volume to zero, then press button to toggle timer on or off.
-Set the volume to zero then double-click to change timer interval
-between 1 hour and 6 hours.
+Set volume to zero, then press button to choose timer duration or to disable.
+Timer can be set to 1 hour, 6 or 12 hours. 
 
 
 Power Down the receiver
 Set volume to zero then wait 5 seconds.
 
 Turn ON the receiver after PowerDown
-Press button to power up. Adjust volume to desired level.
-
+Press button to power up.
 
 
 Modify Station List
@@ -48,7 +46,7 @@ Update station list, then press the SAVE button.
 Set switch to NORMAL position.
 
 
-HOW TO LOCATE NEW STATIONS
+WHERE TO LOCATE NEW STATIONS
 https://www.internet-radio.com/
 
 
