@@ -1,6 +1,6 @@
-/**
+/*
  * esp32-stream-system.cpp
- * jul-sep 2024
+ * jul-sep 2024, feb 2025
  * 
  * AetherStream - Stream From the Beyond
  * Copyright (C)2024,2025 Steven R Stuart
@@ -8,9 +8,8 @@
  * This program outputs icy/mp3 internet stream to max98357a i2c audio device(s).
  * Turn the knob to set volume. Press the button to change station.
  * Set volume to 0 and wait 5 seconds and the system will shut-down.
- * Device has a shut-off timer that can be set to 1 hour or 6 hours.
- * One click with volume set to 0 toggles shut-down timer on/off.
- * Two clicks within 3 seconds with volume at 0 changes timer interval setting.
+ * Device has an automatic shut-off timer that can be set to 1 hour, 6 or 12 hours.
+ * Click button with volume set to 0 configures timer.
  * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
  */
