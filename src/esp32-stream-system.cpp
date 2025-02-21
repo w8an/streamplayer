@@ -26,6 +26,7 @@
 #include "SSD1306AsciiWire.h"
 #include <nvs_flash.h>
 #include "prototypes.h"
+#include "AetherStreams.h"
 
 // display I/O
 #define I2C_ADDRESS 0x3C        // ssd1306 oled
@@ -1019,77 +1020,6 @@ char* getStreamsUrl(int index) { // index = 0..TOTAL_ITEMS-1
 
 
 /*
- * Load the following default stream name tags and urls into the prefs object  
- */
-void initializeStreams(void) {
-  // This function clobbers any user entered streams.
-
-  oled.clear();
-  oled.println("INITIALIZE");
-  oled.print("Loading default\nstreams...\n");
-  
-  // Default Streams (49 char name + 49 char url, +nulls)
-  char stream_data[72][50] = { // 72 elements of 50 chars (72/2=36 streams)
-    // 1-10
-    "Psyndora Chillout","http://cast.magicstreams.gr:9125",          
-    "Psyndora Psytrance","http://cast.magicstreams.gr:9111",         
-    "Radio Play Emotions", "http://5.39.82.157:8054/stream",         
-    "Rare 80s Music", "http://209.9.238.4:9844/",                    
-    "Simply Oldies","http://uk5.internet-radio.com:8153",                 
-    "Skylark Stream", "http://uk2.internet-radio.com:8164/listen.ogg",
-    "Synphaera Radio","http://ice2.somafm.com/synphaera-128-mp3",     
-    "The Seagull","http://us5.internet-radio.com:8121",                  
-    "XRDS.fm","http://us1.internet-radio.com:8321",                      
-    "Ambient Radio", "http://uk2.internet-radio.com:8171/stream",     
-    // 11-20
-    "Best of Art Bell","http://108.161.128.117:8050",                 
-    "Big 80s Station","http://158.69.114.190:8024",                   
-    "Big Hair Radio","http://192.111.140.11:8508",                    
-    "Box UK Radio", "http://uk7.internet-radio.com:8226",                      
-    "Classical Radio","http://classicalradiostream.com:8010",               
-    "Dark Edge Radio","http://5.35.214.196:8000",                     
-    "Detroit Industrial Underground", "http://138.197.0.4:8000/stream",
-    "Dimensione Relax", "http://51.161.115.200:8012/stream",           
-    "Disco Funk","http://eu10.fastcast4u.com:8120",                      
-    "EarthSong Experimental","http://cast3.my-control-panel.com:7084/autodj", 
-    // 21-30
-    "First Amendment Radio","http://198.178.123.8:7862",                      
-    "Gothville", "http://gothville.radio:8000/stream",                   
-    "HardTecho and Schranz","http://schranz.in:8000",                    
-    "J-Pop Sakura","http://cast1.torontocast.com:2170",                  
-    "KXFU - RDSN.net","http://184.95.62.170:9788",                       
-    "Lounge Radio", "http://fr1.streamhosting.ch:80/lounge128.mp3",      
-    "Majestic Jukebox","http://uk3.internet-radio.com:8405",             
-    "Mangled Web Radio", "http://144.126.151.19:8000/mp3",               
-    "Megaton Cafe Radio","http://us2.internet-radio.com:8443",           
-    "Metal Express Radio","http://5.135.154.69:11590",                   
-    // 31-36
-    "Metal Rock Radio","http://kathy.torontocast.com:2800",              
-    "Mission Control Radio","http://151.80.42.191:8372",                 
-    "Moon Mission Recordings","http://uk5.internet-radio.com:8306",      
-    "Move Da House","http://uk7.internet-radio.com:8000",                
-    "Mr. Liberty Show","http://198.178.123.5:8258",                      
-    "Musical Ventur Radio","http://us3.internet-radio.com:8614"         
-  };
-
-  for (int item=0; item < TOTAL_ITEMS; item++) {
-    // stuff the prefs object with default data
-    prefs.begin(stream_item[item], PREF_RW);
-    prefs.clear();
-    prefs.putString(stream_type[TYPE_TAG], stream_data[item*2]);
-    prefs.putString(stream_type[TYPE_URL], stream_data[item*2+1]);
-    prefs.end();
-
-    oled.setCursor(0, 3); // col, row
-    oled.clearToEOL();
-    oled.setCursor(0, 3);
-    oled.print(stream_data[item*2]);
-  }
-  putSetting(listened, 0);  // default to first stream
-}
-
-
-/*
  * Create a version tag derived from the compile time
  */
 String version(void) {
@@ -1161,6 +1091,56 @@ void wipeNVS(void) {
   oled.println(F("Complete"));
   oled.printf("Remove D%d jumper", NVS_CLR_PIN);
   while (true);           // loop forever
+}
+
+
+/*
+ * Load the following default stream name tags and urls into the prefs object  
+ */
+void initializeStreams(void) {
+  // This function clobbers any user entered streams.
+
+  oled.clear();
+  oled.println(F("INITIALIZE"));
+  oled.print(F("Loading default\nstreams...\n"));
+  
+  // Default Streams (49 char name + 49 char url, +nulls)
+  char stream_data[72][50] = { // 72 elements of 50 chars (72/2=36 streams)
+    // 1-10
+    STREAMTAG_1,  STREAMURL_1,  STREAMTAG_2,  STREAMURL_2,
+    STREAMTAG_3,  STREAMURL_3,  STREAMTAG_4,  STREAMURL_4,
+    STREAMTAG_5,  STREAMURL_5,  STREAMTAG_6,  STREAMURL_6,
+    STREAMTAG_7,  STREAMURL_7,  STREAMTAG_8,  STREAMURL_8,
+    STREAMTAG_9,  STREAMURL_9,  STREAMTAG_10, STREAMURL_10,
+    STREAMTAG_11, STREAMURL_11, STREAMTAG_12, STREAMURL_12,
+    STREAMTAG_13, STREAMURL_13, STREAMTAG_14, STREAMURL_14,
+    STREAMTAG_15, STREAMURL_15, STREAMTAG_16, STREAMURL_16,
+    STREAMTAG_17, STREAMURL_17, STREAMTAG_18, STREAMURL_18,
+    STREAMTAG_19, STREAMURL_19, STREAMTAG_20, STREAMURL_20,
+    STREAMTAG_21, STREAMURL_21, STREAMTAG_22, STREAMURL_22,
+    STREAMTAG_23, STREAMURL_23, STREAMTAG_24, STREAMURL_24,
+    STREAMTAG_25, STREAMURL_25, STREAMTAG_26, STREAMURL_26,
+    STREAMTAG_27, STREAMURL_27, STREAMTAG_28, STREAMURL_28,
+    STREAMTAG_29, STREAMURL_29, STREAMTAG_30, STREAMURL_30,
+    STREAMTAG_31, STREAMURL_31, STREAMTAG_32, STREAMURL_32,
+    STREAMTAG_33, STREAMURL_33, STREAMTAG_34, STREAMURL_34,
+    STREAMTAG_35, STREAMURL_35, STREAMTAG_36, STREAMURL_36
+  };
+
+  for (int item=0; item < TOTAL_ITEMS; item++) {
+    // stuff the prefs object with default data
+    prefs.begin(stream_item[item], PREF_RW);
+    prefs.clear();
+    prefs.putString(stream_type[TYPE_TAG], stream_data[item*2]);
+    prefs.putString(stream_type[TYPE_URL], stream_data[item*2+1]);
+    prefs.end();
+
+    oled.setCursor(0, 3); // col, row
+    oled.clearToEOL();
+    oled.setCursor(0, 3);
+    oled.print(stream_data[item*2]);
+  }
+  putSetting(listened, 0);  // default to first stream
 }
 
 // eof
