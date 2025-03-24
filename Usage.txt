@@ -40,9 +40,9 @@ Set the side panel switch into the center NORM position.
 
 
 CONFIGURE WIFI
-select the Wifi station named: NETRADIO
-Using phone browser, go to address: 192.168.4.1
-Update station list, then press the SAVE button.
+select the Wifi station named: AetherStreamer
+Using phone browser on the same network, go to address: 192.168.4.1
+Update station list, then click the SAVE button.
 Set switch to NORMAL position.
 
 
@@ -54,3 +54,4 @@ OTA update
 In portal, upload the firmware file located at:
 /../esp32_stream_player/.pio/build/esp32dev/firmware.bin
 
+Steven R Stuart, W8AN
