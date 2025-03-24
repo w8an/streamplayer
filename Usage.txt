@@ -38,11 +38,10 @@ store changes into the Aether Streamer unit.
 Set the side panel switch into the center NORM position.
 
 
-
 CONFIGURE WIFI
-select the Wifi station named: AetherStreamer
-Using phone browser on the same network, go to address: 192.168.4.1
-Update station list, then click the SAVE button.
+On phone or PC, select the Wifi station named: AetherStreamer
+then use browser to go to address: 192.168.4.1
+Select WiFi access point then enter its password. Click the SAVE button.
 Set switch to NORMAL position.
 
 
