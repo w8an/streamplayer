@@ -37,15 +37,19 @@
 #define NVS_CLR_PIN 17          // clear non-volatile memory when low on reset
 #define STREAM_PIN 16           // set default streams when low on reset
 #define PORTAL_PIN 15           // enable wifi portal when pulled low      
+#define META_PIN 27             // display stream meta when high (default)
 
 // portal states
 #define PORTAL_DOWN 0           // portal is off
 #define PORTAL_UP 1             // portal is running
-#define PORTAL_SAVE 2           // save pending
+#define PORTAL_SAVE 2           // data save is pending
 #define PORTAL_IDLE 4           // waiting for switch reset
 
+// display parameters
+#define OLED_LINEWIDTH 21       // char width of display (5x7 font)
+#define OLED_TIMER   3500       // display timeout in milliseconds
+
 // timer settings
-#define OLED_TIMER 5000         // display timeout in milliseconds
 #define MS1HOUR   3600000       // 1 hour in milliseconds
 #define MS6HOUR  21600000       // 6 hours in ms
 #define MS12HOUR 43200000       // 12 hours in ms
@@ -95,12 +99,11 @@ void IRAM_ATTR readEncoderISR() {     // interrupt service routine
 }
 
 // Instatiate the objects
-URLStream urlstream;                  // Use ICYStream if metadata is desired
-//ICYStream urlstream;                // Use URLStream when metadata is not needed
-I2SStream i2s;
+ICYStream icystream;                  // stream object with metadata
+I2SStream i2s;                        // audio data
 VolumeStream volume(i2s);
 EncodedAudioStream mp3decode(&volume, new MP3DecoderHelix()); // Decoder stream
-StreamCopy copier(mp3decode, urlstream); // copy urlstream to decoder
+StreamCopy copier(mp3decode, icystream); // copy icystream to decoder
 SSD1306AsciiWire oled;
 Preferences prefs;                    // persistent data store
 WiFiManager wifiMan;                  // instatiate a wifi object
@@ -166,6 +169,7 @@ void setup() {
   pinMode(PORTAL_PIN, INPUT_PULLUP);  // call for wifi portal
   pinMode(STREAM_PIN, INPUT_PULLUP);  // load default streams
   pinMode(NVS_CLR_PIN, INPUT_PULLUP); // clear non-volatile memory
+  pinMode(META_PIN, INPUT_PULLUP);    // enable meta title function
 
   // Message port
   Serial.begin(115200);
@@ -177,13 +181,15 @@ void setup() {
   Serial.print(F("ver "));
   Serial.println(version());
   
-  // OLED display device
+  // SSD1306 OLED display device
   Wire.begin(SDA_PIN, SCL_PIN);  // start i2c interface
   Wire.setClock(400000L);
   oled.begin(&Adafruit128x32, I2C_ADDRESS);  // start oled
-  oled.setFont(System5x7);
+  oled.setFont(Adafruit5x7);     // choose a font
+  //oled.setFont(System5x7);
+  //oled.setFont(font5x7);
   //oled.setFont(lcd5x7);
-
+  
   if (digitalRead(NVS_CLR_PIN) == LOW) wipeNVS(); // user request to clear memory
 
   if (digitalRead(STREAM_PIN) == LOW) 
@@ -196,9 +202,9 @@ void setup() {
   // Configure Wifi system
   wifiPortalMessage();
   wifiMan.setDebugOutput(false);  // true if you want send to serial debug
-  if (digitalRead(PORTAL_PIN) == LOW) {  // call for portal
+  if (digitalRead(PORTAL_PIN) == LOW) {  
+    // user requested WiFi configuration portal
 
-    Serial.println(F("User requested WiFi configuration portal"));
     //wifiMan.resetSettings();     // erase wifi configuration
     wifiPortalMessage();
     wifiMan.startConfigPortal(portalName); 
@@ -295,8 +301,13 @@ unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
 
 // portal
-int portalMode = PORTAL_DOWN; 
-bool firstPortal = true;
+int portalMode = PORTAL_DOWN;     // current state
+bool firstPortal = true;          // op flag
+
+// meta data
+bool metaEnabled = false;         // true when data desired (set by META_PIN input)
+bool metaQueryTriggered = false;  // true when queued for display
+String metaTitle;
 
 
 /*
@@ -330,8 +341,8 @@ void loop() {
       if (checkProtocol(currentIndex)) {
         // url seems ok
 
-        urlstream.begin(getStreamsUrl(currentIndex));
-        urlstream.setMetadataCallback(callbackMetadata); // metadata processor
+        icystream.begin(getStreamsUrl(currentIndex));
+        icystream.setMetadataCallback(callbackMetadata); // metadata processor
         putSetting(listened, currentIndex);              // save current selection
         systemStreaming = true;
       }
@@ -344,8 +355,11 @@ void loop() {
         oled.println(F("ERROR\nMissing URL\nReverting"));
       }
 
+      metaTitle = String("");        // clear old title
+      metaQueryTriggered = true;     // show title if available
+
       displayIsOn = true;
-      oledStartTime = millis(); // reset display timer
+      oledStartTime = millis();      // reset display timer
     }
 
     if (rotaryEncoder.isEncoderButtonClicked()) { 
@@ -377,7 +391,7 @@ void loop() {
 
           timerInSetupMode = false;
           oled.clear();
-          oled.println(F("* SAVE TIMER"));
+          oled.println(F("TIMER SAVED"));
           
           if (timerIsRunning) {  // user selected a timer duration
 
@@ -404,7 +418,7 @@ void loop() {
             streamSelectionMenuIsOpen = false;
             rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
             currentIndex = menuIndex;  // user chose this stream
-            urlstream.end();           // stop stream download
+            icystream.end();           // stop stream download
             systemStreaming = false;   // signal that another stream is selected
             oledStatusDisplay();
           }
@@ -456,14 +470,18 @@ void loop() {
           else displayTimerDurationSetting();  
         }
 
-        else { // knob has turned, but not setting timer, and not selecting stream
-          // default function for encoder change
+        else { 
+          // knob has turned, but not setting timer, and not selecting stream
+          // (this is default procedure for an encoder change)
 
           // adjust the volume level
           // volLevel value will be saved when oled timeout occurs
           volLevel = 100 - rotaryEncoder.readEncoder();
           volume.setVolume(volLevel / 100.0); // set speaker level
+
           oledStatusDisplay();  
+
+          metaQueryTriggered = true;  // enable meta data (displays when metaEnabled)
         }
       }
 
@@ -482,6 +500,13 @@ void loop() {
     if (oledCurrentTime - oledStartTime > OLED_TIMER) {
       // oled timer has expired
 
+      oled.clear();  // blank the display
+      displayIsOn = false;
+
+      if (volLevel == 0) {
+        systemPowerDown(); // Put into sleep mode
+      }
+
       if (streamSelectionMenuIsOpen) {
 
         streamSelectionMenuIsOpen = false;
@@ -489,14 +514,14 @@ void loop() {
         rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
       }
 
-      oled.clear();  // blank the display
-      displayIsOn = false;
+      if (metaQueryTriggered) {      // time for meta display
+        metaQueryTriggered = false;  // reset metadata flag
+        if (metaEnabled) {           // if user wants meta
+          displayMeta();             // show it now
+        }
+      }
 
       if (portalMode == PORTAL_UP) StreamPortalMessage(); // an override message
-
-      if (volLevel == 0) {
-        systemPowerDown(); // Put into sleep mode
-      }
 
       if (timerInSetupMode) {
   
@@ -530,7 +555,7 @@ void loop() {
     if (sleepCurrentTime - sleepStartTime > sleepTimerDuration) {
 
       // timer has expired, go to sleep (silent idle mode)
-      urlstream.end();         // stop stream download
+      icystream.end();         // stop stream download
       systemStreaming = false; // set state signals
       systemIsSleeping = true;
 
@@ -541,6 +566,10 @@ void loop() {
     }
   }
 
+  // display meta at status timeout when enabled
+  if (digitalRead(META_PIN) == HIGH) metaEnabled = true;
+  else metaEnabled = false;   // pull pin low to disable
+  
   // Portal functions
   if (portalMode == PORTAL_UP) wifiMan.process(); // process the portal web page
   bool portalSwitch = !digitalRead(PORTAL_PIN);   // true when pin is low
@@ -631,45 +660,85 @@ void loop() {
  *
  */
 
+/*
+ * Display the stream metadata
+ */
+void displayMeta(void) {
+
+  oled.clear();
+  
+  int strLength = metaTitle.length();
+  if (strLength == 0) return;           // no data
+
+  if (strLength < (OLED_LINEWIDTH-3)*3) // suppress heading on long title
+    oled.println("NOW PLAYING");        // heading
+  oledSplitString(metaTitle);           // display the metadata
+
+  displayIsOn = true;
+  oledStartTime = millis();            // reset the display timer
+}
+
+
+/*
+ * Split the string into words and display them unbroken
+ */
+void oledSplitString(String str) {
+  // convert to char array for tokenization
+  char buffer[str.length() + 1];
+  str.toCharArray(buffer, sizeof(buffer));
+  
+  // initialize current line and word pointer
+  String currentLine = "";
+  char* word = strtok(buffer, " ");
+  
+  // process each word
+  while (word != NULL) {
+      String wordStr(word);
+      
+      // check if adding this word would exceed line length
+      if (currentLine.length() + wordStr.length() + 1 <= OLED_LINEWIDTH) {
+          // Add word to current line
+          if (currentLine.length() > 0) {
+              currentLine += " ";
+          }
+          currentLine += wordStr;
+      } 
+      else {
+          // Print current line and start new one
+          oled.println(currentLine);
+          currentLine = wordStr;
+      }
+
+      word = strtok(NULL, " ");
+  }
+  
+  // print last line if not empty
+  if (currentLine.length() > 0) {
+      oled.println(currentLine);
+  }
+}
+
 
 /*
  * Parameter web page callback function
+ * called when the SAVE button is clicked on the 
+ * portal parameter web page:
+ * http://<local_ip>/param
  */
 void callbackSaveParams(void) {
-  // called when the SAVE button is clicked on the 
-  // portal parameter web page -> http://<local_ip>/param
 
-  portalMode = PORTAL_SAVE; // data save is pending
+  portalMode = PORTAL_SAVE;     // data save is pending
 }
 
 
 /*
  * Metadata callback function
+ * called when stream metadata is available
  */
 void callbackMetadata(MetaDataType type, const char* str, int len) {
-  // called when stream metadata is available
-  // note that ICYStream must be used
 
-  Serial.print("==> ");
-  Serial.print(toStr(type));
-  Serial.print(": ");
-  Serial.println(str);
-
-/*  
-  * * * CURRENTLY NOT USED * * *
-
-  // Note: This may be incorrect for current libary metadata strings
-  // Example: Extract the "StreamTitle" field
-  int titleStart = metadata.indexOf("StreamTitle='");
-  if (titleStart != -1) {
-    titleStart += 13; // Move past "StreamTitle='"
-    int titleEnd = metadata.indexOf("';", titleStart);
-    if (titleEnd != -1) {
-      String streamTitle = metadata.substring(titleStart, titleEnd);
-      Serial.println("Now Playing: " + streamTitle);
-    }
-  }
-*/  
+  // we are only interested in the stream title
+  if (type == MetaDataType::Title) metaTitle = String(str);
 }
 
 
@@ -1062,7 +1131,7 @@ String version(void) {
 void systemPowerDown(void) {
   oled.print(F("SYSTEM POWER DOWN\nClick to Restart\n\nv.")); // notification
   oled.print(version());
-  urlstream.end();          // stop stream download
+  icystream.end();          // stop stream download
   systemStreaming = false;  // set state signals
   systemIsSleeping = true;
   esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
