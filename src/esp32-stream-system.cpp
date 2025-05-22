@@ -37,6 +37,7 @@
 #define NVS_CLR_PIN 17          // clear non-volatile memory when low on reset
 #define STREAM_PIN 16           // set default streams when low on reset
 #define PORTAL_PIN 15           // enable wifi portal when pulled low      
+#define TOGGLE_PIN 14           // stream toggle button
 #define META_PIN 27             // display stream meta when high (default)
 
 // portal states
@@ -51,8 +52,11 @@
 
 // timer settings
 #define MS1HOUR   3600000       // 1 hour in milliseconds
-#define MS6HOUR  21600000       // 6 hours in ms
-#define MS12HOUR 43200000       // 12 hours in ms
+#define MS2HOUR   7200000       // 2 hours
+#define MS4HOUR  14400000       // 4 hours
+#define MS6HOUR  21600000       // 6 hours
+#define MS8HOUR  28800000       // 8 hours
+#define MS12HOUR 43200000       // 12 hours
 
 // System is hard coded to 36 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
@@ -69,9 +73,10 @@ char streamsX[TOTAL_ITEMS * STREAM_ITEM_SIZE]; // names & urls of stations
 #define PREF_RW false                 // pref read/write
 const char* portalName = "AetherStreamer"; // portal ssid
 const char* settings = "settings";    // general purpose namespace in prefs
-const char* listened = "listened";    // settings key of last listened to stream
+const char* curStream = "curStream";  // settings key of current stream
+const char* prvStream = "prvStream";  // settings key of previous stream
 const char* audiovol = "volume";      // settings key of audio level
-const char* timerVal = "timerVal";    // 0 = 1 hour, else 6 hours
+const char* timerVal = "timerVal";    // 0 is 1 hour, 1=2hr, 2=4hr, 3=6, 4=8, 5=12 hour
 const char* timerOn  = "timerOn";     // setting key of timer activity state
 const char* initPref = "initPref";    // key for initilization
 
@@ -197,7 +202,7 @@ void setup() {
   populateStreams();       // fill streamsX array from prefs 
 
   // Reload the default streams if desired
-  currentIndex = getSetting(listened);  // get index of previous listened stream
+  currentIndex = getSetting(curStream);  // get index of current stream
 
   // Configure Wifi system
   wifiPortalMessage();
@@ -288,6 +293,7 @@ unsigned long oledCurrentTime = 0;
 
 // stream status
 bool systemStreaming = false;
+bool streamToggleOption = false;          // switch to previous stream
 
 // menu vars
 bool streamSelectionMenuIsOpen = false;
@@ -309,6 +315,8 @@ bool metaEnabled = false;         // true when data desired (set by META_PIN inp
 bool metaQueryTriggered = false;  // true when queued for display
 String metaTitle;
 
+// stream toggle button
+bool toggleFlag = false;
 
 /*
  *
@@ -343,13 +351,13 @@ void loop() {
 
         icystream.begin(getStreamsUrl(currentIndex));
         icystream.setMetadataCallback(callbackMetadata); // metadata processor
-        putSetting(listened, currentIndex);              // save current selection
+        putSetting(curStream, currentIndex);              // save current selection
         systemStreaming = true;
       }
       else { // url string error
         
         // url string is not recognized
-        currentIndex = getSetting(listened); // get previous stream
+        currentIndex = getSetting(curStream); // get previous stream
         menuIndex = currentIndex;  // reset menu display pointer
         oled.clear();
         oled.println(F("ERROR\nMissing URL\nReverting"));
@@ -360,6 +368,17 @@ void loop() {
 
       displayIsOn = true;
       oledStartTime = millis();      // reset display timer
+    }
+
+    if (digitalRead(TOGGLE_PIN) == LOW) toggleFlag = true; // set toggle flag
+    else if (toggleFlag) {  // it is toggled
+      // toggle to previous stream
+      toggleFlag = false;
+      streamToggleOption = false;               // reset option
+      currentIndex = toggleToPreviousStream();  // get the previous index
+      icystream.end();                          // stop current stream
+      systemStreaming = false;                  // causes new stream launch
+      oledStatusDisplay();
     }
 
     if (rotaryEncoder.isEncoderButtonClicked()) { 
@@ -385,7 +404,7 @@ void loop() {
 
       else {  
         // button was clicked and volume is not zero
-
+        
         if (timerInSetupMode) {
           // Store and activate timer setting
 
@@ -414,22 +433,38 @@ void loop() {
 
           if (streamSelectionMenuIsOpen) { 
 
-            // close the menu, prepare selected stream
+            if (streamToggleOption) {
+              // toggle stream
+              // user clicked again before scrolling 
+              // to a new stream, so open the previous stream
+              streamToggleOption = false;               // reset option
+              currentIndex = toggleToPreviousStream();  // get the previous index
+              icystream.end();                          // stop current stream
+              systemStreaming = false;                  // causes new stream launch
+              oledStatusDisplay();
+            }
+
+            else {
+              // close the menu, prepare selected stream
+              rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
+              currentIndex = menuIndex;  // user chose this stream
+              icystream.end();           // stop stream download
+              systemStreaming = false;   // signal that another stream is selected
+              oledStatusDisplay();
+            }
+
             streamSelectionMenuIsOpen = false;
-            rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
-            currentIndex = menuIndex;  // user chose this stream
-            icystream.end();           // stop stream download
-            systemStreaming = false;   // signal that another stream is selected
-            oledStatusDisplay();
           }
 
           else { // stream selection menu is not open
 
+            streamToggleOption = true;               // allow to toggle to last stream
+
             // open the menu, select a stream
-            streamSelectionMenuIsOpen = true;
+            streamSelectionMenuIsOpen = true;        // menu is available
             volumePos = rotaryEncoder.readEncoder(); // get volume setting
             rotaryEncoder.setEncoderValue(50);       // initialize position
-            displayStreamMenu(currentIndex);  // show stream selection list
+            displayStreamMenu(currentIndex);         // show stream selection list
           }
         }
       }
@@ -440,10 +475,12 @@ void loop() {
   
     if (rotaryEncoder.encoderChanged()) {   // knob has been turned
 
+      streamToggleOption = false;   // cancel the prev stream option
+
       if (streamSelectionMenuIsOpen) { 
         // knob has turned and stream selection menu is open
         // scroll the menu
-
+        
         long encoderCurrPos = rotaryEncoder.readEncoder();
         if (encoderCurrPos > 50) menuIndex--; // determine direction
         else menuIndex++;
@@ -500,17 +537,18 @@ void loop() {
     if (oledCurrentTime - oledStartTime > OLED_TIMER) {
       // oled timer has expired
 
-      oled.clear();  // blank the display
-      displayIsOn = false;
+      oled.clear();                // blank the display
+      displayIsOn = false;         // quiet condition
+      streamToggleOption = false;  // reset option
 
       if (volLevel == 0) {
-        systemPowerDown(); // Put into sleep mode
+        systemPowerDown();         // Put into sleep mode
       }
 
       if (streamSelectionMenuIsOpen) {
 
         streamSelectionMenuIsOpen = false;
-        menuIndex = currentIndex;  // no selection, reset menu display pointer
+        menuIndex = currentIndex;    // no selection, reset menu display pointer
         rotaryEncoder.setEncoderValue(volumePos);   // restore volume position 
       }
 
@@ -660,6 +698,18 @@ void loop() {
  *
  */
 
+
+int toggleToPreviousStream(void) {
+  // save the running stream index 
+  // then return the index of previous stream selection
+
+  int prvStreamIndex = getSetting(prvStream);
+  putSetting(prvStream, currentIndex);
+
+  return prvStreamIndex; 
+ }
+
+
 /*
  * Display the stream metadata
  */
@@ -808,7 +858,7 @@ String timerTimeLeft(void) {
 
     sleepCurrentTime = millis(); // set baseline
     unsigned long totalSeconds = 
-                  sleepTimerDuration/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
+      sleepTimerDuration/1000 - ((sleepCurrentTime - sleepStartTime)/1000);
     unsigned long hours = totalSeconds / 3600;
     unsigned long minutes = (totalSeconds % 3600) / 60;
 
@@ -831,25 +881,30 @@ void displayStreamMenu(int menuIndex) {
 
   // previous line item
   int lineIndex = (menuIndex == 0 ? (TOTAL_ITEMS-1) : menuIndex-1);
-  //oled.print(F(" ")); // indent
   if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
   else oled.println(lineIndex+1); // print only line number if error
   
   // current line item
-  if (checkProtocol(menuIndex)) {  // selection line
-    oled.setInvertMode(true);
-    //oled.print(F(">")); // current item pointer
-    oled.println(getStreamsTag(menuIndex));
-    oled.setInvertMode(false);
-  } 
-  else {
-    //oled.print(F(" ")); // indent
-    oled.println(menuIndex+1);
+  if (streamToggleOption) {
+    // initially, show toggle stream at cursor
+    int prev = getSetting(prvStream);
+    if (checkProtocol(prev)) {  // selection line
+      oled.print(F("> "));
+      oled.println(getStreamsTag(prev));
+    } 
+    else oled.println(menuIndex+1);
   }
-  
+  else { // not streamToggleOption
+    if (checkProtocol(menuIndex)) {  // selection line
+      oled.setInvertMode(true);
+      oled.println(getStreamsTag(menuIndex));
+      oled.setInvertMode(false);
+    } 
+    else oled.println(menuIndex+1);
+  }
+
   // next line item
   lineIndex = (menuIndex == (TOTAL_ITEMS-1) ? 0 : menuIndex+1);
-  //oled.print(F(" ")); // indent
   if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
   else oled.print(lineIndex+1);
 }
@@ -860,8 +915,11 @@ void displayStreamMenu(int menuIndex) {
  */
 void assignTimerValsFromPrefs(void) {
   switch (getSetting(timerVal)) {
-    case 1: sleepTimerDuration = MS6HOUR; break;
-    case 2: sleepTimerDuration = MS12HOUR; break;
+    case 1: sleepTimerDuration = MS2HOUR; break;
+    case 2: sleepTimerDuration = MS4HOUR; break;
+    case 3: sleepTimerDuration = MS6HOUR; break;
+    case 4: sleepTimerDuration = MS8HOUR; break;
+    case 5: sleepTimerDuration = MS12HOUR; break;
     default: sleepTimerDuration = MS1HOUR;
   }
   if (getSetting(timerOn) == 1) timerIsRunning = true;
@@ -922,10 +980,14 @@ void displayTimerDurationSetting(void) {
 void timerDurationText(int durval) { 
 
   switch (durval) {
-    case 1: oled.println(F("6 hours")); break;
-    case 2: oled.println(F("12 hours")); break;
-    default: oled.println(F("1 hour")); //MS1HOUR
+    case 1: oled.print(F("2")); break;
+    case 2: oled.print(F("4")); break;
+    case 3: oled.print(F("6")); break;
+    case 4: oled.print(F("8")); break;
+    case 5: oled.print(F("12")); break;
+    default: oled.print(F("1")); 
   }
+  oled.println(F(" hour"));
 }
 
 
@@ -941,15 +1003,13 @@ void changeTimerDuration(void) {
   } 
   else {
     switch (sleepTimerDuration) {
-      case MS1HOUR:
-        sleepTimerDuration = MS6HOUR;
-        break;
-      case MS6HOUR: 
-        sleepTimerDuration = MS12HOUR;
-        break;
-      case MS12HOUR:
-        sleepTimerDuration = MS1HOUR; 
-        timerIsRunning = false;
+      case MS1HOUR: sleepTimerDuration = MS2HOUR; break;
+      case MS2HOUR: sleepTimerDuration = MS4HOUR; break;
+      case MS4HOUR: sleepTimerDuration = MS6HOUR; break;
+      case MS6HOUR: sleepTimerDuration = MS8HOUR; break;
+      case MS8HOUR: sleepTimerDuration = MS12HOUR; break;
+      case MS12HOUR: sleepTimerDuration = MS1HOUR; 
+        timerIsRunning = false; 
         break;
     }
   }
@@ -962,8 +1022,11 @@ void changeTimerDuration(void) {
 unsigned long timerValueToDuration(int settingVal) {
   // prefs timerVal to duration
   switch (settingVal) {
-    case 1: return MS6HOUR; 
-    case 2: return MS12HOUR;
+    case 1: return MS2HOUR; 
+    case 2: return MS4HOUR;
+    case 3: return MS6HOUR; 
+    case 4: return MS8HOUR;
+    case 5: return MS12HOUR; 
   }
   return MS1HOUR;  // case 0
 }
@@ -975,8 +1038,11 @@ unsigned long timerValueToDuration(int settingVal) {
 int timerDurationToValue(unsigned long duration) {
   // duration to prefs timerVal
   switch (duration) {
-    case MS6HOUR: return 1;
-    case MS12HOUR: return 2;
+    case MS2HOUR: return 1;
+    case MS4HOUR: return 2;
+    case MS6HOUR: return 3;
+    case MS8HOUR: return 4;
+    case MS12HOUR: return 5;
   }
   return 0;
 }
@@ -1209,7 +1275,7 @@ void initializeStreams(void) {
     oled.setCursor(0, 3);
     oled.print(stream_data[item*2]);
   }
-  putSetting(listened, 0);  // default to first stream
+  putSetting(curStream, 0);  // default to first stream
 }
 
 // eof
