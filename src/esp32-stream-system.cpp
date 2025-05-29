@@ -1,17 +1,22 @@
 /*
  * esp32-stream-system.cpp
- * jul-sep 2024, feb 2025
  * 
  * AetherStream - Stream From the Beyond
  * Copyright (C)2024,2025 Steven R Stuart
  * 
- * This program outputs icy/mp3 internet stream to max98357a i2c audio device(s).
- * Turn the knob to set volume. Press the button to change station.
- * Set volume to 0 and wait 5 seconds and the system will shut-down.
- * Device has an automatic shut-off timer that can be set to 1 hour, 6 or 12 hours.
- * Click button with volume set to 0 configures timer.
- * Hold PORTAL_PIN low on reset to launch wifi configuration portal.
+ * This program outputs icy/mp3 internet stream to max98357a i2s audio device(s).
+ * Turn the knob to set volume. Press the button to set stream.
+ * Press button twice to switch to previous stream.
+ * Alternately, a momentary low on TOGGLE_PIN will switch to previous stream. 
+ * Set volume to 0 and wait a moment and the system will shut-down.
+ * An automatic shut-off timer can be set to several durations or disabled.
+ * Set volume to 0 then click button to configure the automatic timer.
+ * 
+ * Hold PORTAL_PIN low on reset to launch WiFi configuration portal.
+ * Hold PORTAL_PIN low during operation to launch the system web portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
+ * Hold META_PIN low during operation to suppress meta data display.
+ * Hold NVS_CLR_PIN low on reset to erase memory content (factory reset).
  */
 
 #include <Arduino.h>
@@ -51,12 +56,12 @@
 #define OLED_TIMER   3500       // display timeout in milliseconds
 
 // timer settings
-#define MS1HOUR   3600000       // 1 hour in milliseconds
-#define MS2HOUR   7200000       // 2 hours
-#define MS4HOUR  14400000       // 4 hours
-#define MS6HOUR  21600000       // 6 hours
-#define MS8HOUR  28800000       // 8 hours
-#define MS12HOUR 43200000       // 12 hours
+#define MS1HOUR  3600000       // 1 hour in milliseconds
+#define MS2HOUR  3600000 * 2   // 2 hours
+#define MS4HOUR  3600000 * 4   // 4 hours
+#define MS6HOUR  3600000 * 6   // 6 hours
+#define MS8HOUR  3600000 * 8   // 8 hours
+#define MS12HOUR 3600000 * 12  // 12 hours
 
 // System is hard coded to 36 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
@@ -171,9 +176,10 @@ WiFiManagerParameter* urlElementParam[TOTAL_ITEMS]; // and url objects
  */
 void setup() {
 
-  pinMode(PORTAL_PIN, INPUT_PULLUP);  // call for wifi portal
-  pinMode(STREAM_PIN, INPUT_PULLUP);  // load default streams
   pinMode(NVS_CLR_PIN, INPUT_PULLUP); // clear non-volatile memory
+  pinMode(STREAM_PIN, INPUT_PULLUP);  // load default streams
+  pinMode(PORTAL_PIN, INPUT_PULLUP);  // call for wifi portal
+  pinMode(TOGGLE_PIN, INPUT_PULLUP);  // stream toggle function
   pinMode(META_PIN, INPUT_PULLUP);    // enable meta title function
 
   // Message port
@@ -324,6 +330,7 @@ bool toggleFlag = false;
  * 
  */
 void loop() {
+
   if (systemIsSleeping) {
     
     if (rotaryEncoder.isEncoderButtonClicked() ||
@@ -340,6 +347,7 @@ void loop() {
     }
 
   }
+
   else { // system is active
 
     if (systemStreaming) copier.copy();  // Run the open audio stream
@@ -371,7 +379,9 @@ void loop() {
     }
 
     if (digitalRead(TOGGLE_PIN) == LOW) toggleFlag = true; // set toggle flag
+
     else if (toggleFlag) {  // it is toggled
+
       // toggle to previous stream
       toggleFlag = false;
       streamToggleOption = false;               // reset option
@@ -528,6 +538,7 @@ void loop() {
   }
 
   oledCurrentTime = millis();
+
   if (displayIsOn) {
     // Turn off oled after a few seconds.
     // Save volume level into prefs data if changed.
@@ -733,6 +744,7 @@ void displayMeta(void) {
  * Split the string into words and display them unbroken
  */
 void oledSplitString(String str) {
+
   // convert to char array for tokenization
   char buffer[str.length() + 1];
   str.toCharArray(buffer, sizeof(buffer));
@@ -819,7 +831,7 @@ void oledStatusDisplay(void) {
     oled.clear();
     oled.println(F("ZERO FUNCTION"));
     oled.println(F("Click for Timer"));
-    oled.println(F(" or"));
+    oled.println(F("  or"));
     oled.print(F("Wait for Shutdown"));
   }
 }
@@ -879,34 +891,38 @@ void displayStreamMenu(int menuIndex) {
   oled.clear();
   oled.println(getStreamsTag(currentIndex));  // title line
 
-  // previous line item
-  int lineIndex = (menuIndex == 0 ? (TOTAL_ITEMS-1) : menuIndex-1);
-  if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
-  else oled.println(lineIndex+1); // print only line number if error
-  
-  // current line item
   if (streamToggleOption) {
-    // initially, show toggle stream at cursor
+
+    // initially, show the toggle stream name at cursor
     int prev = getSetting(prvStream);
     if (checkProtocol(prev)) {  // selection line
-      oled.print(F("> "));
+      oled.print(F("\n> "));
       oled.println(getStreamsTag(prev));
     } 
     else oled.println(menuIndex+1);
   }
-  else { // not streamToggleOption
+  
+  else { // toggle option canceled 
+  
+    // previous line item
+    int lineIndex = (menuIndex == 0 ? (TOTAL_ITEMS-1) : menuIndex-1);
+    if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
+    else oled.println(lineIndex+1); // print only line number if error
+
+    // current line item
     if (checkProtocol(menuIndex)) {  // selection line
       oled.setInvertMode(true);
       oled.println(getStreamsTag(menuIndex));
       oled.setInvertMode(false);
     } 
     else oled.println(menuIndex+1);
+
+    // next line item
+    lineIndex = (menuIndex == (TOTAL_ITEMS-1) ? 0 : menuIndex+1);
+    if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
+    else oled.print(lineIndex+1);
   }
 
-  // next line item
-  lineIndex = (menuIndex == (TOTAL_ITEMS-1) ? 0 : menuIndex+1);
-  if (checkProtocol(lineIndex)) oled.println(getStreamsTag(lineIndex));
-  else oled.print(lineIndex+1);
 }
 
 
@@ -914,6 +930,7 @@ void displayStreamMenu(int menuIndex) {
  * Set system timer settings from stored values
  */
 void assignTimerValsFromPrefs(void) {
+
   switch (getSetting(timerVal)) {
     case 1: sleepTimerDuration = MS2HOUR; break;
     case 2: sleepTimerDuration = MS4HOUR; break;
@@ -931,6 +948,7 @@ void assignTimerValsFromPrefs(void) {
  * Display the timer enabled setting at current oled cursor position
  */
 void displayTimerEnabledSetting(void) {
+
   // show the pref setting
   if (getSetting(timerOn) == 0) timerEnabledText(false);
   else timerEnabledText(true);
@@ -941,6 +959,7 @@ void displayTimerEnabledSetting(void) {
  * Timer display text logic
  */
 void displayTimerIsRunningSetting(void) {
+
   // show the running setting
   if (timerIsRunning) timerEnabledText(true);
   else timerEnabledText(false);
@@ -951,6 +970,7 @@ void displayTimerIsRunningSetting(void) {
  * Output the timer enabled state text
  */
 void timerEnabledText(bool en) {
+
   if (en) oled.println(F("Enabled"));
   else oled.println(F("Disabled"));
 }
@@ -960,6 +980,7 @@ void timerEnabledText(bool en) {
  * Display the timer duration pref setting at current oled cursor position
  */
 void displayTimerValSetting(void) {
+
   // from pref
   timerDurationText(getSetting(timerVal));
 }
@@ -968,7 +989,8 @@ void displayTimerValSetting(void) {
 /*
  * Timer duration text logic
  */
-void displayTimerDurationSetting(void) {    
+void displayTimerDurationSetting(void) {  
+
   // current time length setting
   timerDurationText(timerDurationToValue(sleepTimerDuration));
 }
@@ -1020,6 +1042,7 @@ void changeTimerDuration(void) {
  * Convert timer pref value to duration
  */
 unsigned long timerValueToDuration(int settingVal) {
+
   // prefs timerVal to duration
   switch (settingVal) {
     case 1: return MS2HOUR; 
@@ -1036,6 +1059,7 @@ unsigned long timerValueToDuration(int settingVal) {
  * Convert timer duration to pref value
  */
 int timerDurationToValue(unsigned long duration) {
+
   // duration to prefs timerVal
   switch (duration) {
     case MS2HOUR: return 1;
@@ -1052,6 +1076,7 @@ int timerDurationToValue(unsigned long duration) {
  * Return true if the url protocol text is correct
  */
 bool checkProtocol(int menuIndex) {
+
   return strncmp(getStreamsUrl(menuIndex), "http://", 7) == 0;
 }
 
@@ -1060,6 +1085,7 @@ bool checkProtocol(int menuIndex) {
  * Retrieve a persistent preference setting
  */
 int getSetting(const char* setting) {
+
   prefs.begin(settings, PREF_RO);
   int settingVal = prefs.getInt(setting, 0); // default = 0
   prefs.end();
@@ -1071,6 +1097,7 @@ int getSetting(const char* setting) {
  * Store a persistent preference setting
  */
 void putSetting(const char* setting, int settingVal) {
+
   prefs.begin(settings, PREF_RW);
   prefs.putInt(setting, settingVal);
   prefs.end();
@@ -1119,6 +1146,7 @@ void populateStreams(void) {
  * Fill the prefs object with data from the streamsX array
  */
 void populatePrefs(void) {
+
   for (int item=0; item < TOTAL_ITEMS; item++) {
     prefs.begin(stream_item[item], PREF_RW); 
     prefs.clear();
@@ -1133,6 +1161,7 @@ void populatePrefs(void) {
  * Put the stream tag and url strings into the streamsX array
  */
 void putStreams(int index, const char* tag, const char* url) {
+
   strncpy( streamsX + (index * STREAM_ITEM_SIZE), tag, STREAM_ELEMENT_SIZE );
   strncpy( streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE), url, STREAM_ELEMENT_SIZE );
 }
@@ -1141,7 +1170,9 @@ void putStreams(int index, const char* tag, const char* url) {
 /*
  * Get the name tag string from the streamsX array at index
  */
-char* getStreamsTag(int index) { // index = 0..TOTAL_ITEMS-1
+char* getStreamsTag(int index) { 
+
+  // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE);
 }
 
@@ -1149,7 +1180,9 @@ char* getStreamsTag(int index) { // index = 0..TOTAL_ITEMS-1
 /*
  * Get the url string from the streamsX array at index
  */
-char* getStreamsUrl(int index) { // index = 0..TOTAL_ITEMS-1
+char* getStreamsUrl(int index) { 
+  
+  // index = 0..TOTAL_ITEMS-1
   return streamsX + (index * STREAM_ITEM_SIZE + STREAM_ELEMENT_SIZE);
 }
 
@@ -1158,6 +1191,7 @@ char* getStreamsUrl(int index) { // index = 0..TOTAL_ITEMS-1
  * Create a version tag derived from the compile time
  */
 String version(void) {
+
   // Extract date and time from __DATE__ and __TIME__
   const char monthStr[12][4] = {
       "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
@@ -1195,6 +1229,7 @@ String version(void) {
  * Put CPU to sleep. Reboot when wake up requested.
  */
 void systemPowerDown(void) {
+
   oled.print(F("SYSTEM POWER DOWN\nClick to Restart\n\nv.")); // notification
   oled.print(version());
   icystream.end();          // stop stream download
@@ -1219,6 +1254,7 @@ void systemPowerDown(void) {
  * Wipe the NVS memory (wifi, prefs, etc.)
  */
 void wipeNVS(void) {
+
   oled.clear();
   oled.print(F("NVS\nClearing Memory\n"));
   nvs_flash_erase();      // erase the NVS partition and...
