@@ -26,6 +26,7 @@ Set volume to zero, then wait.
 
 Turn ON the receiver after PowerDown
 Press button to power up.
+Last used stream will begin to play.
 
 
 Modify Station List :
@@ -48,11 +49,14 @@ Any URL that is blank or has an error will not be selectable.
 
 
 Configure WiFi :
-Using a phone or Wifi enabled PC, select the Wifi station 
-named: AetherStreamer
-Using browser, go to address: 192.168.4.1
-Update station list, then press the SAVE button.
-Set switch to RUN position.
+Using a phone or a Wifi enabled PC, select the Wifi station named: 
+  AetherStreamer
+Using a browser, go to address: 192.168.4.1
+Click the Configure WiFi button.
+Choose from the list of available WiFi systems.
+Enter the WiFi password if needed. 
+Click Save.
+
 
 
 
