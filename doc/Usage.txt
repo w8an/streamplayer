@@ -1,0 +1,58 @@
+AETHER STREAMER 
+
+Volume Level :
+Turn knob to adjust volume level.
+
+
+Change Station :
+Press button, turn knob to scroll the list to find your desired station. 
+When your desired station is highlighted on the list, press to select.
+The station stream will be launched immediately.
+
+When you first press the button, the previous station will be shown. Click
+again to toggle to that station. Otherwise turn the knob to select. 
+No action and the current station will continue to play.
+
+
+Auto Shut-Down Timer :
+If timer is enabled, the remaining time will show on status display.
+The timer can be enabled, disabled or its interval changed.
+Set volume to zero, then press button to choose timer duration or to disable.
+Timer can be set to 1 hour, 2, 4, 6, 8 or 12 hours. 
+
+
+Power Down the receiver :
+Set volume to zero, then wait.
+
+Turn ON the receiver after PowerDown
+Press button to power up.
+
+
+Modify Station List :
+Set switch to PORTAL position.
+The display will show the unit configuration portal address, 
+something like:  
+
+PORTAL OPEN
+192.168.1.10/param
+
+Using a phone or PC on same network, go to the address displayed on 
+the panel. There will be 36 memory slots displayed, two lines per 
+item; the Name and Address of each station. Change any slot name 
+and address as desired. Click the SAVE button at the bottom of the 
+page to store changes into the Aether Streamer unit.
+Set the switch back to the center RUN position.
+
+Any URL that is blank or has an error will not be selectable.
+
+
+
+Configure WiFi :
+Using a phone or Wifi enabled PC, select the Wifi station 
+named: AetherStreamer
+Using browser, go to address: 192.168.4.1
+Update station list, then press the SAVE button.
+Set switch to RUN position.
+
+
+
