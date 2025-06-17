@@ -15,7 +15,8 @@
  * Hold PORTAL_PIN low on reset to launch WiFi configuration portal.
  * Hold PORTAL_PIN low during operation to launch the system web portal.
  * Hold STREAM_PIN low on reset to load and store default stream data.
- * Hold META_PIN low during operation to suppress meta data display.
+ * Hold META_PIN low during operation to suppress auto meta data display.
+ * Pulse or hold TITLE_PIN low to view current meta data title.
  * Hold NVS_CLR_PIN low on reset to erase memory content (factory reset).
  */ 
 
@@ -59,6 +60,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define STREAM_PIN 16           // set default streams when low on reset
 #define PORTAL_PIN 15           // enable wifi portal when pulled low      
 #define TOGGLE_PIN 14           // stream toggle button
+#define TITLE_PIN 13            // user call to show meta title on the display
 #define META_PIN 27             // display stream meta when high (default)
 
 // portal states
@@ -196,6 +198,7 @@ void setup() {
   pinMode(STREAM_PIN, INPUT_PULLUP);  // load default streams
   pinMode(PORTAL_PIN, INPUT_PULLUP);  // call for wifi portal
   pinMode(TOGGLE_PIN, INPUT_PULLUP);  // stream toggle function
+  pinMode(TITLE_PIN, INPUT_PULLUP);   // user demand of title 
   pinMode(META_PIN, INPUT_PULLUP);    // enable meta title function
 
   // Message port
@@ -233,21 +236,25 @@ void setup() {
     // user requested WiFi configuration portal
 
     //wifiMan.resetSettings();     // erase wifi configuration
+    Serial.println(F("Manual portal requested"));
     wifiPortalMessage();
-    wifiMan.startConfigPortal(portalName); 
+    wifiMan.startConfigPortal(portalName); // 
   }
 
   else { // configuration portal has not been requested.
 
     // Tries to connect to the last known network. Launches a
     // captive portal if the connection fails or the timeout is reached.
-    if(wifiMan.autoConnect(portalName)) {   
+    Serial.println(F("Wifi auto-connect attempt.."));
+    wifiMan.setConfigPortalTimeout(120);  // Timeout in seconds for autoConnect
+    if(wifiMan.autoConnect(portalName)) {
         // Retrieve the current Wi-Fi configuration
         wifi_config_t conf;
         if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK) {
+          Serial.print(F("Connected to "));
+          Serial.printf("SSID: %s\n", (char*)conf.sta.ssid);
           if (digitalRead(STREAM_PIN) == LOW) {
             // show the stored ssid and password if STREAM_PIN is also low
-            Serial.printf("SSID: %s\n", (char*)conf.sta.ssid);
             Serial.printf("Password: %s\n", (char*)conf.sta.password);
           }
         } 
@@ -255,6 +262,8 @@ void setup() {
           Serial.println(F("Failed to get WiFi config"));
           oled.clear();
           oled.print(F("CONFIG FAIL\nWiFi Error\n"));
+          delay(OLED_TIMER);
+          esp_restart();
         }
         oled.clear();
     } 
@@ -394,9 +403,19 @@ void loop() {
       oledStartTime = millis();      // reset display timer
     }
 
+    if (digitalRead(TITLE_PIN) == LOW) {
+      if (!displayIsOn) {
+
+        // show the meta title information
+        displayMeta();
+        displayIsOn = true;
+        oledStartTime = millis();      // reset display timer
+      }
+    }
+
     if (digitalRead(TOGGLE_PIN) == LOW) toggleFlag = true; // set toggle flag
 
-    else if (toggleFlag) {  // it is toggled
+    if (toggleFlag) {  // switch to previous stream
 
       // toggle to previous stream
       toggleFlag = false;
@@ -465,6 +484,7 @@ void loop() {
               // to a new stream, so open the previous stream
               streamToggleOption = false;               // reset option
               currentIndex = toggleToPreviousStream();  // get the previous index
+              rotaryEncoder.setEncoderValue(volumePos); // restore volume position 
               icystream.end();                          // stop current stream
               systemStreaming = false;                  // causes new stream launch
               oledStatusDisplay();
@@ -710,7 +730,7 @@ void loop() {
       portalMode = PORTAL_DOWN;
 
       oled.clear();
-      oled.print(F("PORTAL DOWN"));
+      oled.print(F("PORTAL CLOSED"));
       displayIsOn = true;
       oledStartTime = millis(); // reset display timer
     }
@@ -1260,7 +1280,7 @@ void systemPowerDown(void) {
   // CPU is now in sleep mode. ZZZzzzz
 
   // code will resume here when restart signal is asserted
-  oled.println(F("SYSTEM RESTART")); // notification
+  oled.println(F("SYSTEM START UP")); // notification
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
   esp_restart();            // reboot cpu
 }
@@ -1293,7 +1313,6 @@ void initializeStreams(void) {
   
   // Default Streams (49 char name + 49 char url, +nulls)
   char stream_data[72][50] = { // 72 elements of 50 chars (72/2=36 streams)
-    // 1-10
     STREAMTAG_1,  STREAMURL_1,  STREAMTAG_2,  STREAMURL_2,
     STREAMTAG_3,  STREAMURL_3,  STREAMTAG_4,  STREAMURL_4,
     STREAMTAG_5,  STREAMURL_5,  STREAMTAG_6,  STREAMURL_6,
