@@ -17,6 +17,7 @@
  * Hold STREAM_PIN low on reset to load and store default stream data.
  * Hold META_PIN low during operation to suppress auto meta data display.
  * Pulse or hold TITLE_PIN low to view current meta data title.
+ * Hold START_PIN low on power up or reset to launch stream immediately.
  * Hold NVS_CLR_PIN low on reset to erase memory content (factory reset).
  */ 
 
@@ -61,6 +62,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define PORTAL_PIN 15           // enable wifi portal when pulled low      
 #define TOGGLE_PIN 14           // stream toggle button
 #define TITLE_PIN 13            // user call to show meta title on the display
+#define START_PIN 21            // run stream on power up if low on reset
 #define META_PIN 27             // display stream meta when high (default)
 
 // portal states
@@ -179,8 +181,9 @@ const char* urlElement[] = {          // portal url element tags/titles
 
 // globals
 long volLevel;                     // audio volume level
-bool timerIsRunning;                 // timer active state
+bool timerIsRunning;               // timer active state
 unsigned long sleepTimerDuration;  // user desired sleep time
+bool systemIsSleeping = true;      // suppress stream on power up
 
 // portal elements
 WiFiManagerParameter* tagElementParam[TOTAL_ITEMS]; // Arrays to store pointers to tag objects
@@ -199,6 +202,7 @@ void setup() {
   pinMode(PORTAL_PIN, INPUT_PULLUP);  // call for wifi portal
   pinMode(TOGGLE_PIN, INPUT_PULLUP);  // stream toggle function
   pinMode(TITLE_PIN, INPUT_PULLUP);   // user demand of title 
+  pinMode(START_PIN, INPUT_PULLUP);   // enable stream on power up
   pinMode(META_PIN, INPUT_PULLUP);    // enable meta title function
 
   // Message port
@@ -220,11 +224,15 @@ void setup() {
   //oled.setFont(font5x7);
   //oled.setFont(lcd5x7);
   
-  if (digitalRead(NVS_CLR_PIN) == LOW) wipeNVS(); // user request to clear memory
+  if (digitalRead(NVS_CLR_PIN) == LOW) 
+    wipeNVS();                // user request to clear memory
 
   if (digitalRead(STREAM_PIN) == LOW) 
-    initializeStreams();   // user request to load default streams
-  populateStreams();       // fill streamsX array from prefs 
+    initializeStreams();      // user request to load default streams
+  populateStreams();          // fill streamsX array from prefs 
+
+  if (digitalRead(START_PIN) == LOW) 
+    systemIsSleeping = false; // stream upon power up
 
   // Reload the default streams if desired
   currentIndex = getSetting(curStream);  // get index of current stream
@@ -279,6 +287,7 @@ void setup() {
 
   oled.clear();
   oled.print(F("Aether Streamer\nSteven R Stuart\n\n"));
+  if (systemIsSleeping) oled.println(F("Turn Knob to Wake"));
   //oled.print(version());
 
   // Keyes KY-040
@@ -332,7 +341,7 @@ int menuIndex = currentIndex;
 long volumePos;
 
 // sleep timer status and timing
-bool systemIsSleeping = false;
+//bool systemIsSleeping = false;
 bool timerInSetupMode = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
