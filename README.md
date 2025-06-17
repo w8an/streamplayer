@@ -13,4 +13,5 @@ This program outputs icy/mp3 internet stream to max98357a i2s audio device(s).
 - Hold PORTAL_PIN low during operation to launch the system web portal.
 - Hold STREAM_PIN low on reset to load and store default stream data.
 - Hold META_PIN low during operation to suppress meta data display.
+- Pulse or hold TITLE_PIN low to view current meta data title.
 - Hold NVS_CLR_PIN low on reset to erase memory content (factory reset).
