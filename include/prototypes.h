@@ -1,7 +1,10 @@
 // Function prototypes
+void displayMeta(void);
+void oledSplitString(String);
 void callbackSaveParams(void);
 void callbackMetadata(MetaDataType, const char*, int);
 void oledStatusDisplay(void);
+int toggleToPreviousStream(void);
 void StreamPortalMessage(void);
 void wifiPortalMessage(void);
 String timerTimeLeft(void);
@@ -24,9 +27,9 @@ void populatePrefs(void);
 void putStreams(int, const char*, const char*);
 char* getStreamsTag(int);
 char* getStreamsUrl(int);
-void initializeStreams(void);
 String version(void);
 void systemPowerDown(void);
+bool wakeOnClick(int);
 void wipeNVS(void);
-
-  
+void initializeStreams(void);
+ 

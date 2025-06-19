@@ -104,6 +104,7 @@ const char* audiovol = "volume";      // settings key of audio level
 const char* timerVal = "timerVal";    // 0 is 1 hour, 1=2hr, 2=4hr, 3=6, 4=8, 5=12 hour
 const char* timerOn  = "timerOn";     // setting key of timer activity state
 const char* initPref = "initPref";    // key for initilization
+const char* woc      = "woc";         // wake on click
 
 // MAX98357 I2S audio board pins
 #define MAX_DIN 22   // serial data
@@ -179,6 +180,10 @@ const char* urlElement[] = {          // portal url element tags/titles
   "URL_36"
 };
 
+// wake on click modes
+#define WOC_GET   0
+#define WOC_SET   1
+
 // globals
 long volLevel;                     // audio volume level
 bool timerIsRunning;               // timer active state
@@ -234,6 +239,9 @@ void setup() {
   if (digitalRead(START_PIN) == LOW) 
     systemIsSleeping = false; // stream upon power up
 
+  if (wakeOnClick(WOC_GET)) 
+    systemIsSleeping = false; // waking from a zero volume sleep
+
   // Reload the default streams if desired
   currentIndex = getSetting(curStream);  // get index of current stream
 
@@ -287,7 +295,7 @@ void setup() {
 
   oled.clear();
   oled.print(F("Aether Streamer\nSteven R Stuart\n\n"));
-  if (systemIsSleeping) oled.println(F("Turn Knob to Wake"));
+  if (systemIsSleeping) oled.println(F("Turn Knob to Play"));
   //oled.print(version());
 
   // Keyes KY-040
@@ -753,17 +761,6 @@ void loop() {
  *    Program Functions
  *
  */
-
-
-int toggleToPreviousStream(void) {
-  // save the running stream index 
-  // then return the index of previous stream selection
-
-  int prvStreamIndex = getSetting(prvStream);
-  putSetting(prvStream, currentIndex);
-
-  return prvStreamIndex; 
- }
 
 
 /*
@@ -1233,6 +1230,20 @@ char* getStreamsUrl(int index) {
 
 
 /*
+ * Get index of the previous stream
+ */
+ int toggleToPreviousStream(void) {
+  // save the running stream index 
+  // then return the index of previous stream selection
+
+  int prvStreamIndex = getSetting(prvStream);
+  putSetting(prvStream, currentIndex);
+
+  return prvStreamIndex; 
+ }
+
+
+/*
  * Create a version tag derived from the compile time
  */
 String version(void) {
@@ -1280,6 +1291,7 @@ void systemPowerDown(void) {
   icystream.end();          // stop stream download
   systemStreaming = false;  // set state signals
   systemIsSleeping = true;
+  wakeOnClick(WOC_SET);     // save shutdown mode state
   esp_sleep_enable_ext0_wakeup((gpio_num_t) ROTARY_ENCODER_BUTTON_PIN, LOW); // set the restart signal
   esp_wifi_stop();          // shut down wifi
   delay(OLED_TIMER);
@@ -1294,6 +1306,30 @@ void systemPowerDown(void) {
   esp_restart();            // reboot cpu
 }
 
+
+/*
+ * Check or set the wake-on-click flag.
+ * used to determine the shutdown state
+ */
+bool wakeOnClick(int woc_mode) {
+  // returns true if woc is set
+
+  int woc_val;  // wake-on-click value
+
+  switch (woc_mode) {
+    case WOC_GET:
+      woc_val = getSetting(woc);
+      if (woc_val == WOC_SET) {
+        putSetting(woc, 0); // reset the value
+        return true;
+      }
+      break;
+    case WOC_SET:
+      putSetting(woc, WOC_SET); // set the value
+      return true;
+  }
+  return false;
+}
 
 /*
  * Wipe the NVS memory (wifi, prefs, etc.)
