@@ -82,6 +82,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define MS6HOUR  3600000 * 6   // 6 hours
 #define MS8HOUR  3600000 * 8   // 8 hours
 #define MS12HOUR 3600000 * 12  // 12 hours
+#define INACTIVE_TIMER 60000 * 10  // 10 minutes
 
 // System is hard coded to 36 streams (TOTAL_ITEMS)
 // Each item in the streamsX array contains a text name and a url,
@@ -349,10 +350,12 @@ int menuIndex = currentIndex;
 long volumePos;
 
 // sleep timer status and timing
-//bool systemIsSleeping = false;
 bool timerInSetupMode = false;
 unsigned long sleepStartTime = millis();
 unsigned long sleepCurrentTime = 0;
+bool deepSleepPending = false;
+unsigned long deepSleepCountdown = millis();
+unsigned long deepSleepCurrentTime = 0;
 
 // portal
 int portalMode = PORTAL_DOWN;     // current state
@@ -380,6 +383,7 @@ void loop() {
 
       // wake from sleep
       systemIsSleeping = false;
+      deepSleepPending = false;
       sleepStartTime = millis();  // reset sleep timer baseline
 
       oled.clear();
@@ -388,6 +392,15 @@ void loop() {
       oledStartTime = millis(); // tickle the display timer
     }
 
+    if (deepSleepPending) {
+        deepSleepCurrentTime = millis();
+        if (deepSleepCurrentTime - deepSleepCountdown > INACTIVE_TIMER)
+          systemPowerDown();  
+    }
+    else {
+      deepSleepPending = true;
+      deepSleepCountdown = millis();
+    }
   }
 
   else { // system is active
@@ -1314,12 +1327,9 @@ void systemPowerDown(void) {
 bool wakeOnClick(int woc_mode) {
   // returns true if woc is set
 
-  int woc_val;  // wake-on-click value
-
   switch (woc_mode) {
     case WOC_GET:
-      woc_val = getSetting(woc);
-      if (woc_val == WOC_SET) {
+      if (getSetting(woc) == WOC_SET) {
         putSetting(woc, 0); // reset the value
         return true;
       }
